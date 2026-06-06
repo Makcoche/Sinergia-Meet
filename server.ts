@@ -11,8 +11,9 @@ import { GoogleGenAI } from '@google/genai';
 const app = express();
 const PORT = 3000;
 
-// Body parser
-app.use(express.json());
+// Body parser with 10mb limit for uploads
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 // Initialize Google GenAI Client
 const aiKey = process.env.GEMINI_API_KEY || 'fake_key';
@@ -35,6 +36,7 @@ import {
   getUserById,
   getUserByEmail,
   createUser,
+  updateUser,
   getWallets,
   getWalletByUserId,
   createWallet,
@@ -173,6 +175,44 @@ app.post('/api/auth/register', async (req, res) => {
   } catch (err: any) {
     console.error('[API REGISTER ERROR]', err);
     return res.status(500).json({ error: 'Error del servidor durante el registro' });
+  }
+});
+
+// Update Profile route (Support avatar & company logo update)
+app.post('/api/users/update-profile', async (req, res) => {
+  try {
+    const { userId, avatar, companyLogo } = req.body;
+    if (!userId) {
+      return res.status(400).json({ error: 'El ID de usuario es requerido' });
+    }
+
+    const updates: any = {};
+    if (avatar !== undefined) {
+      updates.avatar = avatar;
+    }
+    if (companyLogo !== undefined) {
+      updates.companyLogo = companyLogo;
+    }
+
+    await updateUser(userId, updates);
+    const updatedUser = await getUserById(userId);
+
+    // Save audit log
+    await createAuditLog({
+      id: `aud-${Date.now()}`,
+      userId,
+      action: 'USER_PROFILE_UPDATED',
+      ipAddress: req.ip || '127.0.0.1',
+      userAgent: req.headers['user-agent'] || 'Chrome',
+      details: `Perfil de usuario o logo de empresa actualizado correctamente para el ID ${userId}.`,
+      severity: 'INFO',
+      createdAt: new Date().toISOString()
+    });
+
+    return res.json({ success: true, user: updatedUser });
+  } catch (err: any) {
+    console.error('[API UPDATE PROFILE ERROR]', err);
+    return res.status(500).json({ error: 'Error del servidor al actualizar el perfil' });
   }
 });
 

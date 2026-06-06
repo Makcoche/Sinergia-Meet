@@ -53,6 +53,64 @@ export default function App() {
     }
   }, [currentUser, pendingMeetingId]);
 
+  // Upload hooks & handlers
+  const logoInputRef = React.useRef<HTMLInputElement>(null);
+  const avatarInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentUser) return;
+
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64String = reader.result as string;
+      try {
+        const res = await fetch('/api/users/update-profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: currentUser.id, avatar: base64String }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setCurrentUser(data.user);
+          localStorage.setItem('sinergia_user', JSON.stringify(data.user));
+        } else {
+          console.error('Error al subir la foto de perfil en el servidor.');
+        }
+      } catch (err) {
+        console.error('Error de comunicación con el servidor al subir la foto de perfil.', err);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentUser) return;
+
+    const reader = new FileReader();
+    reader.onloadend = async () => {
+      const base64String = reader.result as string;
+      try {
+        const res = await fetch('/api/users/update-profile', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: currentUser.id, companyLogo: base64String }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setCurrentUser(data.user);
+          localStorage.setItem('sinergia_user', JSON.stringify(data.user));
+        } else {
+          console.error('Error al subir el logo de empresa en el servidor.');
+        }
+      } catch (err) {
+        console.error('Error de comunicación con el servidor al subir el logo de empresa.', err);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   // Auth form states
   const [authMode, setAuthMode] = useState<'LOGIN' | 'REGISTER'>('LOGIN');
   const [authEmail, setAuthEmail] = useState('');
@@ -346,13 +404,40 @@ export default function App() {
         <div className="space-y-8">
           {/* Logo brand */}
           <div className="hidden md:flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#3B82F6] flex items-center justify-center font-display font-extrabold text-white tracking-widest text-[19px] shadow-lg shadow-blue-500/25">
-              S
+            <div 
+              onClick={() => logoInputRef.current?.click()}
+              className="w-10 h-10 rounded-xl bg-[#3B82F6] flex items-center justify-center font-display font-extrabold text-white tracking-widest text-[19px] shadow-lg shadow-blue-500/25 cursor-pointer relative group overflow-hidden"
+              title="Subir logo de la empresa"
+            >
+              {currentUser.companyLogo ? (
+                <img src={currentUser.companyLogo} className="w-full h-full object-cover" alt="Logo de Sinergia" />
+              ) : (
+                'S'
+              )}
+              <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity" id="logo-hover-indicator">
+                <span className="text-[8px] uppercase tracking-wider font-mono font-bold text-slate-200">Logo</span>
+              </div>
             </div>
             <div>
               <h2 className="font-display font-bold tracking-tight text-white text-[15px] leading-tight">Sinergia Meet</h2>
               <span className="text-[9px] text-[#94A3B8] font-mono tracking-wider">CREATIVE SAAS v1.0.0</span>
             </div>
+            
+            {/* Hidden files upload controls */}
+            <input 
+              type="file" 
+              ref={logoInputRef} 
+              className="hidden" 
+              accept="image/*" 
+              onChange={handleLogoUpload} 
+            />
+            <input 
+              type="file" 
+              ref={avatarInputRef} 
+              className="hidden" 
+              accept="image/*" 
+              onChange={handleAvatarUpload} 
+            />
           </div>
 
           {/* Account and balance info strip */}
@@ -362,7 +447,9 @@ export default function App() {
                 referrerPolicy="no-referrer"
                 src={currentUser.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&h=150&q=80'} 
                 alt={currentUser.name} 
-                className="w-10 h-10 rounded-full border border-[#2D3748] object-cover"
+                className="w-10 h-10 rounded-full border border-[#2D3748] object-cover cursor-pointer hover:border-[#3B82F6] hover:scale-105 transition-all shadow-sm"
+                onClick={() => avatarInputRef.current?.click()}
+                title="Subir foto de perfil"
               />
               <div className="space-y-0.5">
                 <p className="text-xs font-bold text-white max-w-[140px] truncate">{currentUser.name}</p>

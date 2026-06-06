@@ -107,6 +107,11 @@ export async function createUser(user: any): Promise<any> {
   return user;
 }
 
+export async function updateUser(userId: string, data: any): Promise<void> {
+  const ref = doc(db, 'users', userId);
+  await updateDoc(ref, data);
+}
+
 // ==========================================
 // WALLET DATABASE METHODS
 // ==========================================
