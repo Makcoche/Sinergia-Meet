@@ -1,0 +1,6 @@
+{
+  "name": "Sinergia Meet",
+  "description": "SaaS corporativo de videoconferencias con facturación, Sinergia Wallet, resúmenes por IA y administración avanzada.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
