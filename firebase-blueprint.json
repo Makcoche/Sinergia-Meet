@@ -1,0 +1,181 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profiles within Sinergia Meet",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The unique user ID" },
+        "name": { "type": "string", "description": "User display name" },
+        "email": { "type": "string", "format": "email", "description": "Electronic mail address" },
+        "role": { "type": "string", "enum": ["ADMIN", "USER", "ENTERPRISE"], "description": "Access privilege level" },
+        "status": { "type": "string", "enum": ["ACTIVE", "FROZEN"], "description": "Current status of account" },
+        "avatar": { "type": "string", "description": "Avatar image URL" },
+        "emailVerified": { "type": "boolean", "description": "Validation check of email address" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Date of profile creation" }
+      },
+      "required": ["id", "name", "email", "role", "status", "createdAt"]
+    },
+    "Team": {
+      "title": "Team",
+      "description": "Team profiles created by users",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique team ID" },
+        "name": { "type": "string", "description": "Team display name" },
+        "ownerId": { "type": "string", "description": "UID of team owner user" },
+        "membersCount": { "type": "number", "description": "Total members in team" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+      },
+      "required": ["id", "name", "ownerId", "membersCount", "createdAt"]
+    },
+    "Meeting": {
+      "title": "Meeting",
+      "description": "Active or scheduled video meetings",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique meeting ID" },
+        "title": { "type": "string", "description": "Title of the video conference" },
+        "hostId": { "type": "string", "description": "UID of host creator" },
+        "hostName": { "type": "string", "description": "Name of host" },
+        "password": { "type": "string", "description": "Session password if restricted" },
+        "status": { "type": "string", "enum": ["SCHEDULED", "LIVE", "FINISHED"], "description": "Live status of meeting" },
+        "waitingRoom": { "type": "boolean", "description": "Whether guests wait to enter" },
+        "participantCount": { "type": "number", "description": "Active participant count" },
+        "maxParticipants": { "type": "number", "description": "Maximum concurrent participants" },
+        "scheduledFor": { "type": "string", "format": "date-time", "description": "Scheduled start time" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" }
+      },
+      "required": ["id", "title", "hostId", "status", "waitingRoom", "participantCount", "maxParticipants", "createdAt"]
+    },
+    "Wallet": {
+      "title": "Wallet",
+      "description": "Sinergia Digital Wallet details of a user",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique wallet ID" },
+        "userId": { "type": "string", "description": "User owner ID" },
+        "balance": { "type": "number", "description": "Stored financial balance in USD" },
+        "currency": { "type": "string", "description": "Currency code (USD)" },
+        "status": { "type": "string", "enum": ["ACTIVE", "FROZEN"], "description": "Wallet status" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last updated timestamp" }
+      },
+      "required": ["id", "userId", "balance", "currency", "status", "updatedAt"]
+    },
+    "WalletTransaction": {
+      "title": "WalletTransaction",
+      "description": "Sinergia Wallet financial transaction record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique transaction ID" },
+        "walletId": { "type": "string", "description": "Target wallet ID" },
+        "type": { "type": "string", "enum": ["DEPOSIT", "TRANSFER_OUT", "TRANSFER_IN", "FEE"], "description": "Transaction type" },
+        "amount": { "type": "number", "description": "Absolute financial volume" },
+        "description": { "type": "string", "description": "Transaction purpose detail text" },
+        "referenceId": { "type": "string", "description": "External gateway checkout ID" },
+        "recipientEmail": { "type": "string", "format": "email", "description": "Recipient email if transfer" },
+        "status": { "type": "string", "enum": ["COMPLETED", "BLOCKED"], "description": "Transaction progress state" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Record creation date-time" }
+      },
+      "required": ["id", "walletId", "type", "amount", "description", "status", "createdAt"]
+    },
+    "Subscription": {
+      "title": "Subscription",
+      "description": "Premium SaaS Subscription details",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Subscription ID" },
+        "userId": { "type": "string", "description": "User identifier" },
+        "planCode": { "type": "string", "enum": ["FREE", "PROFESSIONAL", "ENTERPRISE"], "description": "Premium category level" },
+        "status": { "type": "string", "enum": ["ACTIVE", "EXPIRED"], "description": "Subscription active status" },
+        "billingPeriod": { "type": "string", "description": "MONTHLY or ANNUAL" },
+        "startDate": { "type": "string", "format": "date-time", "description": "Activation timestamp" },
+        "endDate": { "type": "string", "format": "date-time", "description": "Expiry timestamp" }
+      },
+      "required": ["id", "userId", "planCode", "status", "startDate", "endDate"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "SaaS and Upgrade Invoice Receipts",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Invoice ID" },
+        "userId": { "type": "string", "description": "User paying invoice" },
+        "amount": { "type": "number", "description": "Billed value in USD" },
+        "gateway": { "type": "string", "description": "Deposit and Billing Gateway code" },
+        "status": { "type": "string", "enum": ["PAID", "UNPAID"], "description": "Receipt status" },
+        "planCode": { "type": "string", "description": "Upgrade plan level code" },
+        "date": { "type": "string", "format": "date-time", "description": "Billing timestamp" }
+      },
+      "required": ["id", "userId", "amount", "gateway", "status", "planCode", "date"]
+    },
+    "AuditLog": {
+      "title": "AuditLog",
+      "description": "System usage audit history records",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Audit record ID" },
+        "userId": { "type": "string", "description": "User triggering action" },
+        "action": { "type": "string", "description": "System action identifier tag" },
+        "ipAddress": { "type": "string", "description": "Source IP address" },
+        "userAgent": { "type": "string", "description": "Browser user agent" },
+        "details": { "type": "string", "description": "Action details descriptions" },
+        "severity": { "type": "string", "description": "INFO, WARNING, or CRITICAL" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Action timestamp" }
+      },
+      "required": ["id", "userId", "action", "ipAddress", "userAgent", "details", "severity", "createdAt"]
+    },
+    "Transcript": {
+      "title": "Transcript",
+      "description": "Meeting call voice transcripts and Gemini AI generated report summary briefs",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Assigned meeting target identifier" },
+        "meetingId": { "type": "string", "description": "Target meeting ID" },
+        "speechText": { "type": "string", "description": "Accumulated transcribed conversation words" },
+        "summary": { "type": "string", "description": "Executive summarization generated by generative AI" },
+        "tasks": { "type": "array", "description": "Clean actionable tasks assigned to individual attendees" },
+        "minutes": { "type": "string", "description": "Formal meeting minutes produced server-side" }
+      },
+      "required": ["id", "meetingId", "speechText"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Users of Sinergia Meet platform"
+    },
+    "/teams/{teamId}": {
+      "schema": "Team",
+      "description": "Teams created by users"
+    },
+    "/meetings/{meetingId}": {
+      "schema": "Meeting",
+      "description": "Meetings and virtual rooms"
+    },
+    "/wallets/{walletId}": {
+      "schema": "Wallet",
+      "description": "Sinergia Digital Wallet state"
+    },
+    "/walletTransactions/{txId}": {
+      "schema": "WalletTransaction",
+      "description": "Transaction logs of the wallet"
+    },
+    "/subscriptions/{subId}": {
+      "schema": "Subscription",
+      "description": "User premium subscriptions"
+    },
+    "/invoices/{invoiceId}": {
+      "schema": "Invoice",
+      "description": "Billing receipts and invoices"
+    },
+    "/auditLogs/{logId}": {
+      "schema": "AuditLog",
+      "description": "Security auditing logs"
+    },
+    "/transcripts/{transcriptId}": {
+      "schema": "Transcript",
+      "description": "Meeting transcription and AI results"
+    }
+  }
+}
