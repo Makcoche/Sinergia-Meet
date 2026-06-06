@@ -10,6 +10,7 @@ import {
   Loader2, CheckCircle2, ListTodo, FileText, Lock, Link
 } from 'lucide-react';
 import { User, ChatMessage, Participant } from '../types';
+import { apiFetch } from '../utils/api';
 
 interface MeetingRoomProps {
   meetingId: string;
@@ -118,7 +119,7 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
 
   const addParagraphToServer = async (text: string) => {
     try {
-      await fetch(`/api/meetings/${meetingId}/transcript-add`, {
+      await apiFetch(`/api/meetings/${meetingId}/transcript-add`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text })
@@ -130,7 +131,7 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
 
   const fetchMeetingDetails = async () => {
     try {
-      const res = await fetch('/api/meetings');
+      const res = await apiFetch('/api/meetings');
       if (res.ok) {
         const data = await res.json();
         const found = data.find((m: any) => m.id === meetingId);
@@ -223,13 +224,13 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
       const initialDialogue = transcriptsLog.join('.\n') || `Ana Milena: Hola, la conexión de WebRTC es de baja latencia. José Delgado: Sí, y el panel administrativo muestra las analíticas del VPS adecuadamente. Carlos Mendoza: Excelente trabajo, ya tenemos el enrutador Nginx procesando los certificados SSL de sinergiameet.com de manera robusta.`;
       
       // Inject transcript to database
-      await fetch(`/api/meetings/${meetingId}/transcript-add`, {
+      await apiFetch(`/api/meetings/${meetingId}/transcript-add`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: initialDialogue })
       });
 
-      const res = await fetch(`/api/meetings/${meetingId}/ai-summary`, {
+      const res = await apiFetch(`/api/meetings/${meetingId}/ai-summary`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' }
       });

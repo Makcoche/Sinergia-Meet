@@ -9,6 +9,7 @@ import {
   Send, ShieldAlert, Lock, HelpCircle, CheckCircle2, History 
 } from 'lucide-react';
 import { User, Wallet as WalletType, WalletTransaction } from '../types';
+import { apiFetch } from '../utils/api';
 
 interface WalletDashProps {
   user: User;
@@ -38,7 +39,7 @@ export default function WalletDash({ user }: WalletDashProps) {
 
   const fetchWalletState = async () => {
     try {
-      const res = await fetch(`/api/wallet/balance/${user.id}`);
+      const res = await apiFetch(`/api/wallet/balance/${user.id}`);
       if (res.ok) {
         const data = await res.json();
         setWallet(data.wallet);
@@ -60,7 +61,7 @@ export default function WalletDash({ user }: WalletDashProps) {
     setSuccessMessage('');
 
     try {
-      const res = await fetch('/api/wallet/deposit', {
+      const res = await apiFetch('/api/wallet/deposit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -96,7 +97,7 @@ export default function WalletDash({ user }: WalletDashProps) {
     setSuccessMessage('');
 
     try {
-      const res = await fetch('/api/wallet/transfer', {
+      const res = await apiFetch('/api/wallet/transfer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

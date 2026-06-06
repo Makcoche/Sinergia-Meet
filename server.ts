@@ -69,10 +69,11 @@ app.use((req, res, next) => {
   const origin = req.headers.origin;
   if (origin) {
     res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
   } else {
+    // If no origin, we can fall back to * but do not send Access-Control-Allow-Credentials
     res.setHeader('Access-Control-Allow-Origin', '*');
   }
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
   res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, PUT, PATCH, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   
@@ -80,7 +81,6 @@ app.use((req, res, next) => {
     return res.sendStatus(200);
   }
 
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
@@ -763,9 +763,6 @@ app.post('/api/admin/reset-demo', async (req, res) => {
 // ============================================================================
 
 async function startServer() {
-  // Fire seeding of Firestore data if empty
-  await seedDatabaseIfEmpty();
-
   if (process.env.NODE_ENV !== "production") {
     // Vite middleware for rendering TSX and CSS live
     const vite = await createViteServer({
@@ -783,6 +780,13 @@ async function startServer() {
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`[SINERGIA MEET BACKEND CORE] Servidor corriendo correctamente en http://localhost:${PORT}`);
+    
+    // Seed database asynchronously in the background so it doesn't block server startup
+    seedDatabaseIfEmpty().then(() => {
+      console.log('[DB] Seeding check completed in background.');
+    }).catch(err => {
+      console.error('[DB] Seeding failed in background:', err);
+    });
   });
 }
 

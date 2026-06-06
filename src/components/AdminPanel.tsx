@@ -9,6 +9,7 @@ import {
   Activity, RefreshCw, Layers, AlertOctagon, HelpCircle 
 } from 'lucide-react';
 import { AuditLog } from '../types';
+import { apiFetch } from '../utils/api';
 
 export default function AdminPanel() {
   const [metrics, setMetrics] = useState<any>({
@@ -34,14 +35,14 @@ export default function AdminPanel() {
   const fetchAdminState = async () => {
     try {
       // Fetch Metrics Info
-      const resMetrics = await fetch('/api/admin/metrics');
+      const resMetrics = await apiFetch('/api/admin/metrics');
       if (resMetrics.ok) {
         const met = await resMetrics.json();
         setMetrics(met);
       }
 
       // Fetch Audit logs
-      const resAud = await fetch('/api/admin/audits');
+      const resAud = await apiFetch('/api/admin/audits');
       if (resAud.ok) {
         const auds = await resAud.json();
         setAudits(auds);
@@ -56,7 +57,7 @@ export default function AdminPanel() {
   const triggerResetDemo = async () => {
     setResetting(true);
     try {
-      await fetch('/api/admin/reset-demo', { method: 'POST' });
+      await apiFetch('/api/admin/reset-demo', { method: 'POST' });
       await fetchAdminState();
     } catch (e) {
       console.error(e);

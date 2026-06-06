@@ -9,6 +9,7 @@ import {
   HelpCircle, Ticket, CheckCircle2, ShieldAlert 
 } from 'lucide-react';
 import { User, SaaSPlan, PaymentInvoice } from '../types';
+import { apiFetch } from '../utils/api';
 
 interface BillingSaaSProps {
   user: User;
@@ -85,7 +86,7 @@ export default function BillingSaaS({ user, onRefreshUserBalance }: BillingSaaSP
   const fetchBillingState = async () => {
     // We can fetch user subscription state from server
     try {
-      const res = await fetch(`/api/wallet/balance/${user.id}`);
+      const res = await apiFetch(`/api/wallet/balance/${user.id}`);
       if (res.ok) {
         // Also simulate loading history of invoices
         setInvoices([
@@ -121,7 +122,7 @@ export default function BillingSaaS({ user, onRefreshUserBalance }: BillingSaaSP
     const finalPrice = couponApplied ? parseFloat((rawPrice * (1 - discount / 100)).toFixed(2)) : rawPrice;
 
     try {
-      const res = await fetch('/api/billing/subscribe', {
+      const res = await apiFetch('/api/billing/subscribe', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

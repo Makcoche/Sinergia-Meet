@@ -16,6 +16,7 @@ import BillingSaaS from './components/BillingSaaS';
 import AdminPanel from './components/AdminPanel';
 import TechnicalGuides from './components/TechnicalGuides';
 import { User, Wallet as WalletType } from './types';
+import { apiFetch } from './utils/api';
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
@@ -65,7 +66,7 @@ export default function App() {
     reader.onloadend = async () => {
       const base64String = reader.result as string;
       try {
-        const res = await fetch('/api/users/update-profile', {
+        const res = await apiFetch('/api/users/update-profile', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId: currentUser.id, avatar: base64String }),
@@ -92,7 +93,7 @@ export default function App() {
     reader.onloadend = async () => {
       const base64String = reader.result as string;
       try {
-        const res = await fetch('/api/users/update-profile', {
+        const res = await apiFetch('/api/users/update-profile', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId: currentUser.id, companyLogo: base64String }),
@@ -126,7 +127,7 @@ export default function App() {
     setAuthLoading(true);
 
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await apiFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: authEmail, password: authPassword }),
@@ -154,7 +155,7 @@ export default function App() {
     setAuthLoading(true);
 
     try {
-      const res = await fetch('/api/auth/register', {
+      const res = await apiFetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: authName, email: authEmail, password: authPassword }),
@@ -180,7 +181,7 @@ export default function App() {
     setAuthError('');
     setAuthLoading(true);
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await apiFetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: 'josegregoriourdanetaguadama@gmail.com', password: 'admin' }),
@@ -217,7 +218,7 @@ export default function App() {
   const fetchWalletBalance = async () => {
     if (!currentUser) return;
     try {
-      const res = await fetch(`/api/wallet/balance/${currentUser.id}`);
+      const res = await apiFetch(`/api/wallet/balance/${currentUser.id}`);
       if (res.ok) {
         const data = await res.json();
         setWalletBalance(data.wallet.balance);

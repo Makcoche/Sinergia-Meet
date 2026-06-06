@@ -6,6 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { Video, Calendar, Users, ArrowRight, ShieldCheck, Lock, Play, Plus, Trash2, Clock, Globe, Link } from 'lucide-react';
 import { Meeting, User, Team } from '../types';
+import { apiFetch } from '../utils/api';
 
 interface DashboardProps {
   user: User;
@@ -43,7 +44,7 @@ export default function Dashboard({ user, onJoinMeeting, onNavigateToWallet, onN
 
   const fetchMeetings = async () => {
     try {
-      const res = await fetch('/api/meetings');
+      const res = await apiFetch('/api/meetings');
       if (res.ok) {
         const data = await res.json();
         setMeetings(data);
@@ -55,7 +56,7 @@ export default function Dashboard({ user, onJoinMeeting, onNavigateToWallet, onN
 
   const fetchTeams = async () => {
     try {
-      const res = await fetch(`/api/teams/${user.id}`);
+      const res = await apiFetch(`/api/teams/${user.id}`);
       if (res.ok) {
         const data = await res.json();
         setTeams(data);
@@ -70,7 +71,7 @@ export default function Dashboard({ user, onJoinMeeting, onNavigateToWallet, onN
     if (!newTitle) return;
 
     try {
-      const res = await fetch('/api/meetings', {
+      const res = await apiFetch('/api/meetings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -109,7 +110,7 @@ export default function Dashboard({ user, onJoinMeeting, onNavigateToWallet, onN
     if (!teamName) return;
 
     try {
-      const res = await fetch('/api/teams', {
+      const res = await apiFetch('/api/teams', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: teamName, ownerId: user.id })
