@@ -20,6 +20,10 @@ service cloud.firestore {
       allow read, write: if true;
     }
 
+    match /meetingParticipants/{partId} {
+      allow read, write: if true;
+    }
+
     match /wallets/{walletId} {
       allow read, write: if true;
     }

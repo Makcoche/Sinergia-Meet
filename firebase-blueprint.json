@@ -138,6 +138,27 @@
         "minutes": { "type": "string", "description": "Formal meeting minutes produced server-side" }
       },
       "required": ["id", "meetingId", "speechText"]
+    },
+    "MeetingParticipant": {
+      "title": "MeetingParticipant",
+      "description": "Information about a user inside a meeting",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique participant ID" },
+        "meetingId": { "type": "string", "description": "Meeting room identifier" },
+        "userId": { "type": "string", "description": "User account identifier" },
+        "name": { "type": "string", "description": "User display name" },
+        "avatar": { "type": "string", "description": "Avatar image URL" },
+        "role": { "type": "string", "enum": ["HOST", "PRESENTER", "ATTENDEE"], "description": "Privilege role in call" },
+        "isMuted": { "type": "boolean", "description": "Whether user microphone is muted" },
+        "isVideoOff": { "type": "boolean", "description": "Whether user camera is off" },
+        "handRaised": { "type": "boolean", "description": "Whether hand is raised" },
+        "joinedAt": { "type": "string", "format": "date-time", "description": "When the participant joined" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "When heartbeat last updated" },
+        "kicked": { "type": "boolean", "description": "Whether host kicked user" },
+        "isInWaitingRoom": { "type": "boolean", "description": "Whether user is waiting for admission" }
+      },
+      "required": ["id", "meetingId", "userId", "name", "role", "isMuted", "isVideoOff", "handRaised", "joinedAt"]
     }
   },
   "firestore": {
@@ -152,6 +173,10 @@
     "/meetings/{meetingId}": {
       "schema": "Meeting",
       "description": "Meetings and virtual rooms"
+    },
+    "/meetingParticipants/{partId}": {
+      "schema": "MeetingParticipant",
+      "description": "Participants currently in a live meeting"
     },
     "/wallets/{walletId}": {
       "schema": "Wallet",
