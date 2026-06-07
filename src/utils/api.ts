@@ -22,7 +22,13 @@ export async function apiFetch(input: string, init?: RequestInit): Promise<Respo
   // If we are in the main GCP container (Cloud Run) or local, relative path is ALWAYS 
   // 100% correct, secure, same-origin, and bypasses all CORS or environment misconfigurations.
   // @ts-ignore
-  const apiBase = isRunApp ? '' : ((import.meta.env.VITE_API_URL as string) || '');
+  let apiBase = isRunApp ? '' : ((import.meta.env.VITE_API_URL as string) || '');
+
+  // If we are on an external deployment (e.g., Vercel) and no host URL was manually injected,
+  // we route the API calls back to the active Cloud Run server so that Firestore data persists perfectly.
+  if (!apiBase && !isRunApp) {
+    apiBase = 'https://ais-pre-4wafxtrn3bmnou2273ujz2-574065866095.us-east1.run.app';
+  }
 
   if (input.startsWith('/api/')) {
     if (apiBase) {
