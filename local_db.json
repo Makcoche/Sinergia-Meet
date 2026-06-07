@@ -1,0 +1,78 @@
+{
+  "users": {
+    "user-admin": {
+      "id": "user-admin",
+      "name": "José Urdaneta",
+      "email": "josegregoriourdanetaguadama@gmail.com",
+      "role": "ADMIN",
+      "status": "ACTIVE",
+      "avatar": "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&h=150&q=80",
+      "emailVerified": true,
+      "createdAt": "2026-06-07T16:20:36.639Z"
+    },
+    "user-1": {
+      "id": "user-1",
+      "name": "Ana Milena",
+      "email": "ana.milena@creative.com",
+      "role": "USER",
+      "status": "ACTIVE",
+      "avatar": "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&h=150&q=80",
+      "emailVerified": true,
+      "createdAt": "2026-06-07T16:20:36.639Z"
+    },
+    "user-2": {
+      "id": "user-2",
+      "name": "Carlos Mendoza",
+      "email": "carlos.m@sinergia.com",
+      "role": "ENTERPRISE",
+      "status": "ACTIVE",
+      "avatar": "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=150&h=150&q=80",
+      "emailVerified": true,
+      "createdAt": "2026-06-07T16:20:36.639Z"
+    }
+  },
+  "wallets": {
+    "wallet-admin": {
+      "id": "wallet-admin",
+      "userId": "user-admin",
+      "balance": 1000,
+      "currency": "USD",
+      "status": "ACTIVE",
+      "updatedAt": "2026-06-07T16:20:36.639Z"
+    },
+    "wallet-u1": {
+      "id": "wallet-u1",
+      "userId": "user-1",
+      "balance": 50,
+      "currency": "USD",
+      "status": "ACTIVE",
+      "updatedAt": "2026-06-07T16:20:36.639Z"
+    },
+    "wallet-u2": {
+      "id": "wallet-u2",
+      "userId": "user-2",
+      "balance": 250,
+      "currency": "USD",
+      "status": "ACTIVE",
+      "updatedAt": "2026-06-07T16:20:36.639Z"
+    }
+  },
+  "walletTransactions": {},
+  "meetings": {},
+  "transcripts": {},
+  "teams": {},
+  "subscriptions": {},
+  "invoices": {},
+  "auditLogs": {
+    "aud-1780849439458": {
+      "id": "aud-1780849439458",
+      "userId": "user-admin",
+      "action": "LOGIN_SUCCESS",
+      "ipAddress": "127.0.0.1",
+      "userAgent": "Desconocido",
+      "details": "Inicio de sesión para josegregoriourdanetaguadama@gmail.com",
+      "severity": "INFO",
+      "createdAt": "2026-06-07T16:23:59.459Z"
+    }
+  }
+}

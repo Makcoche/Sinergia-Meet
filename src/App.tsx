@@ -133,16 +133,22 @@ export default function App() {
         body: JSON.stringify({ email: authEmail, password: authPassword }),
       });
 
+      const resText = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(resText);
+      } catch (pErr) {
+        throw new Error(`Respuesta inválida (Status ${res.status}): ${resText.trim().slice(0, 150) || '(Vacío/No-Body)'}`);
+      }
+
       if (res.ok) {
-        const data = await res.json();
         setCurrentUser(data.user);
         localStorage.setItem('sinergia_user', JSON.stringify(data.user));
       } else {
-        const data = await res.json();
         setAuthError(data.error || 'Credenciales inválidas o correo no registrado.');
       }
     } catch (err) {
-      setAuthError('Error al contactar con el nodo central de Sinergia.');
+      setAuthError('Error al contactar con el nodo central de Sinergia: ' + (err instanceof Error ? err.message : String(err)));
     } finally {
       setAuthLoading(false);
     }
@@ -161,16 +167,22 @@ export default function App() {
         body: JSON.stringify({ name: authName, email: authEmail, password: authPassword }),
       });
 
+      const resText = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(resText);
+      } catch (pErr) {
+        throw new Error(`Respuesta inválida (Status ${res.status}): ${resText.trim().slice(0, 150) || '(Vacío/No-Body)'}`);
+      }
+
       if (res.ok) {
-        const data = await res.json();
         setCurrentUser(data.user);
         localStorage.setItem('sinergia_user', JSON.stringify(data.user));
       } else {
-        const data = await res.json();
         setAuthError(data.error || 'El correo electrónico ya existe.');
       }
     } catch (err) {
-      setAuthError('Error corporativo de comunicación de red.');
+      setAuthError('Error corporativo de comunicación de red: ' + (err instanceof Error ? err.message : String(err)));
     } finally {
       setAuthLoading(false);
     }
@@ -187,16 +199,22 @@ export default function App() {
         body: JSON.stringify({ email: 'josegregoriourdanetaguadama@gmail.com', password: 'admin' }),
       });
 
+      const resText = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(resText);
+      } catch (pErr) {
+        throw new Error(`Respuesta inválida (Status ${res.status}): ${resText.trim().slice(0, 150) || '(Vacío/No-Body)'}`);
+      }
+
       if (res.ok) {
-        const data = await res.json();
         setCurrentUser(data.user);
         localStorage.setItem('sinergia_user', JSON.stringify(data.user));
       } else {
-        const data = await res.json();
         setAuthError(data.error || 'Error al autenticar');
       }
     } catch (err) {
-      setAuthError('Error de red');
+      setAuthError('Error de red: ' + (err instanceof Error ? err.message : String(err)));
     } finally {
       setAuthLoading(false);
     }
