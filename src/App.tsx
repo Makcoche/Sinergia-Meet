@@ -113,12 +113,36 @@ export default function App() {
   };
 
   // Auth form states
-  const [authMode, setAuthMode] = useState<'LOGIN' | 'REGISTER'>('LOGIN');
+  const [authMode, setAuthMode] = useState<'LOGIN' | 'REGISTER' | 'GUEST'>(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('meeting') ? 'GUEST' : 'LOGIN';
+  });
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authName, setAuthName] = useState('');
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
+
+  // Authenticate as a guest for a meeting
+  const handleGuestJoin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError('');
+    if (!authName.trim()) {
+      setAuthError('Por favor, ingresa tu nombre para unirte como invitado.');
+      return;
+    }
+    const guestUser: User = {
+      id: `guest-${Math.random().toString(36).substring(2, 11)}`,
+      name: `${authName.trim()} (Invitado)`,
+      email: `guest-${Date.now()}@sinergia.temp`,
+      role: 'USER',
+      status: 'ACTIVE',
+      createdAt: new Date().toISOString(),
+      avatar: `https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&h=150&q=80`
+    };
+    setCurrentUser(guestUser);
+    localStorage.setItem('sinergia_user', JSON.stringify(guestUser));
+  };
 
   // Authenticate user with Backend
   const handleLogin = async (e: React.FormEvent) => {
@@ -281,17 +305,17 @@ export default function App() {
           {pendingMeetingId && (
             <div className="p-3.5 rounded-xl bg-blue-500/15 border border-blue-500/25 text-blue-200 text-xs flex flex-col gap-1 shadow-inner">
               <span className="font-bold flex items-center gap-1.5 text-blue-400 font-mono text-[11px] uppercase tracking-wider">⚡ Invitación activa</span>
-              <p className="text-[11px] text-slate-300 leading-normal">Inicia sesión, regístrate o usa la Entrada Instantánea para unirte de inmediato a la sala de videoconferencia.</p>
+              <p className="text-[11px] text-slate-300 leading-normal">Puedes unirte instantáneamente escribiendo tu nombre en la pestaña <strong>Invitado</strong>, o iniciar sesión / registrarte.</p>
             </div>
           )}
 
           {/* Toggle buttons */}
-          <div className="grid grid-cols-2 gap-1 bg-[#0F172A] p-1 rounded-xl border border-[#2D3748]">
+          <div className={`grid ${pendingMeetingId ? 'grid-cols-3' : 'grid-cols-2'} gap-1 bg-[#0F172A] p-1 rounded-xl border border-[#2D3748]`}>
             <button
               id="auth-toggle-login"
               type="button"
               onClick={() => { setAuthMode('LOGIN'); setAuthError(''); }}
-              className={`py-1.5 rounded-lg text-center font-mono text-xs font-bold transition-all cursor-pointer ${
+              className={`py-1.5 rounded-lg text-center font-mono text-[10px] sm:text-xs font-bold transition-all cursor-pointer ${
                 authMode === 'LOGIN' ? 'bg-[#1E293B] text-[#3B82F6] border border-[#2D3748]' : 'text-[#94A3B8]'
               }`}
             >
@@ -301,15 +325,42 @@ export default function App() {
               id="auth-toggle-register"
               type="button"
               onClick={() => { setAuthMode('REGISTER'); setAuthError(''); }}
-              className={`py-1.5 rounded-lg text-center font-mono text-xs font-bold transition-all cursor-pointer ${
+              className={`py-1.5 rounded-lg text-center font-mono text-[10px] sm:text-xs font-bold transition-all cursor-pointer ${
                 authMode === 'REGISTER' ? 'bg-[#1E293B] text-[#3B82F6] border border-[#2D3748]' : 'text-[#94A3B8]'
               }`}
             >
-              Regístrate
+              Registrarse
             </button>
+            {pendingMeetingId && (
+              <button
+                id="auth-toggle-guest"
+                type="button"
+                onClick={() => { setAuthMode('GUEST'); setAuthError(''); }}
+                className={`py-1.5 rounded-lg text-center font-mono text-[10px] sm:text-xs font-bold transition-all cursor-pointer ${
+                  authMode === 'GUEST' ? 'bg-[#1E293B] text-[#3B82F6] border border-[#2D3748]' : 'text-[#94A3B8]'
+                }`}
+              >
+                Invitado
+              </button>
+            )}
           </div>
 
-          <form onSubmit={authMode === 'LOGIN' ? handleLogin : handleRegister} className="space-y-4">
+          <form onSubmit={authMode === 'GUEST' ? handleGuestJoin : (authMode === 'LOGIN' ? handleLogin : handleRegister)} className="space-y-4">
+            {authMode === 'GUEST' && (
+              <div className="space-y-1">
+                <label className="text-[9px] font-mono text-[#94A3B8] uppercase tracking-wider font-semibold">Tu nombre para la videollamada</label>
+                <input
+                  id="auth-guest-name-input"
+                  type="text"
+                  required
+                  placeholder="Ej: Carolina Rojas"
+                  value={authName}
+                  onChange={(e) => setAuthName(e.target.value)}
+                  className="w-full bg-[#0F172A] border border-[#2D3748] rounded-xl py-2 px-3 text-xs text-white outline-none focus:border-[#3B82F6] focus:ring-1 focus:ring-[#3B82F6] transition-colors"
+                />
+              </div>
+            )}
+
             {authMode === 'REGISTER' && (
               <div className="space-y-1">
                 <label className="text-[9px] font-mono text-[#94A3B8] uppercase tracking-wider font-semibold">Nombre Completo</label>
@@ -325,31 +376,35 @@ export default function App() {
               </div>
             )}
 
-            <div className="space-y-1">
-              <label className="text-[9px] font-mono text-[#94A3B8] uppercase tracking-wider font-semibold">Correo Electrónico</label>
-              <input
-                id="auth-email-input"
-                type="email"
-                required
-                placeholder="Ej: josegregoriourdanetaguadama@gmail.com"
-                value={authEmail}
-                onChange={(e) => setAuthEmail(e.target.value)}
-                className="w-full bg-[#0F172A] border border-[#2D3748] rounded-xl py-2 px-3 text-xs text-white outline-none focus:border-[#3B82F6] focus:ring-1 focus:ring-[#3B82F6] transition-colors font-mono"
-              />
-            </div>
+            {authMode !== 'GUEST' && (
+              <>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-mono text-[#94A3B8] uppercase tracking-wider font-semibold">Correo Electrónico</label>
+                  <input
+                    id="auth-email-input"
+                    type="email"
+                    required
+                    placeholder="Ej: josegregoriourdanetaguadama@gmail.com"
+                    value={authEmail}
+                    onChange={(e) => setAuthEmail(e.target.value)}
+                    className="w-full bg-[#0F172A] border border-[#2D3748] rounded-xl py-2 px-3 text-xs text-white outline-none focus:border-[#3B82F6] focus:ring-1 focus:ring-[#3B82F6] transition-colors font-mono"
+                  />
+                </div>
 
-            <div className="space-y-1">
-              <label className="text-[9px] font-mono text-[#94A3B8] uppercase tracking-wider font-semibold">Contraseña</label>
-              <input
-                id="auth-password-input"
-                type="password"
-                required
-                placeholder="••••••••••••"
-                value={authPassword}
-                onChange={(e) => setAuthPassword(e.target.value)}
-                className="w-full bg-[#0F172A] border border-[#2D3748] rounded-xl py-2 px-3 text-xs text-white outline-none focus:border-[#3B82F6] focus:ring-1 focus:ring-[#3B82F6] transition-colors"
-              />
-            </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-mono text-[#94A3B8] uppercase tracking-wider font-semibold">Contraseña</label>
+                  <input
+                    id="auth-password-input"
+                    type="password"
+                    required
+                    placeholder="••••••••••••"
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    className="w-full bg-[#0F172A] border border-[#2D3748] rounded-xl py-2 px-3 text-xs text-white outline-none focus:border-[#3B82F6] focus:ring-1 focus:ring-[#3B82F6] transition-colors"
+                  />
+                </div>
+              </>
+            )}
 
             {authError && (
               <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-300 text-[11px] flex items-center gap-2" id="auth-error-alert">
@@ -364,7 +419,7 @@ export default function App() {
               disabled={authLoading}
               className="w-full py-2.5 rounded-xl bg-[#3B82F6] hover:bg-blue-600 text-white font-bold text-xs uppercase tracking-wider transition-all cursor-pointer shadow-lg shadow-blue-500/20 disabled:bg-slate-700 disabled:cursor-not-allowed"
             >
-              {authLoading ? 'Procesando...' : authMode === 'LOGIN' ? 'Ingresar al Ecosistema' : 'Registrarse y Obtener Regalo'}
+              {authLoading ? 'Procesando...' : authMode === 'GUEST' ? 'Unirse de inmediato' : authMode === 'LOGIN' ? 'Ingresar al Ecosistema' : 'Registrarse y Obtener Regalo'}
             </button>
           </form>
 
