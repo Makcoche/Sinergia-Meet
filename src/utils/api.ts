@@ -10,7 +10,7 @@
 
 import { initializeApp } from 'firebase/app';
 import { 
-  getFirestore, collection, doc, setDoc, getDoc, getDocs, 
+  initializeFirestore, collection, doc, setDoc, getDoc, getDocs, 
   updateDoc, query, where, deleteDoc
 } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -19,7 +19,11 @@ import firebaseConfig from '../../firebase-applet-config.json';
 let directDb: any = null;
 try {
   const firebaseApp = initializeApp(firebaseConfig);
-  directDb = getFirestore(firebaseApp);
+  directDb = initializeFirestore(firebaseApp, {
+    experimentalForceLongPolling: true,
+    // @ts-ignore
+    useFetchStreams: false,
+  }, firebaseConfig.firestoreDatabaseId);
 } catch (e) {
   console.error('[HYBRID CLIENT API] Client-side Firebase initialization failed:', e);
 }
