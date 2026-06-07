@@ -19,6 +19,17 @@ import { User, Wallet as WalletType } from './types';
 import { apiFetch } from './utils/api';
 
 export default function App() {
+  // Capture the meeting parameter once from the URL when the application mounts
+  const [pendingMeetingId, setPendingMeetingId] = useState<string | null>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const mId = params.get('meeting');
+    if (mId) {
+      window.history.replaceState({}, document.title, window.location.pathname);
+      return mId;
+    }
+    return null;
+  });
+
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     const saved = localStorage.getItem('sinergia_user');
     if (saved) {
@@ -35,16 +46,6 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'MEETING' | 'WALLET' | 'BILLING' | 'ADMIN' | 'GUIDE'>('DASHBOARD');
   const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-
-  const [pendingMeetingId, setPendingMeetingId] = useState<string | null>(() => {
-    const params = new URLSearchParams(window.location.search);
-    const mId = params.get('meeting');
-    if (mId) {
-      window.history.replaceState({}, document.title, window.location.pathname);
-      return mId;
-    }
-    return null;
-  });
 
   // Redirect to active meeting once authenticated
   useEffect(() => {
@@ -114,8 +115,7 @@ export default function App() {
 
   // Auth form states
   const [authMode, setAuthMode] = useState<'LOGIN' | 'REGISTER' | 'GUEST'>(() => {
-    const params = new URLSearchParams(window.location.search);
-    return params.get('meeting') ? 'GUEST' : 'LOGIN';
+    return pendingMeetingId ? 'GUEST' : 'LOGIN';
   });
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');

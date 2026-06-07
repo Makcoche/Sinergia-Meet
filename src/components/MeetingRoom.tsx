@@ -128,17 +128,17 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
 
   // Sync our media controls and metadata state whenever it changes
   useEffect(() => {
-    updateOurPresence(isMuted, isVideoOff, handRaised);
-  }, [isMuted, isVideoOff, handRaised, meetingId, user.id, meetingHostId]);
+    updateOurPresence(isMuted, isVideoOff, handRaised, amIInWaitingRoom);
+  }, [isMuted, isVideoOff, handRaised, meetingId, user.id, meetingHostId, amIInWaitingRoom]);
 
   // Periodic heartbeat to prevent timeout on other clients' grids
   useEffect(() => {
     const presenceHeartbeat = setInterval(() => {
-      updateOurPresence(isMuted, isVideoOff, handRaised);
+      updateOurPresence(isMuted, isVideoOff, handRaised, amIInWaitingRoom);
     }, 5000);
 
     return () => clearInterval(presenceHeartbeat);
-  }, [isMuted, isVideoOff, handRaised, meetingId, user.id, meetingHostId]);
+  }, [isMuted, isVideoOff, handRaised, meetingId, user.id, meetingHostId, amIInWaitingRoom]);
 
   // Remove our presence record on unmount / window unload
   useEffect(() => {
