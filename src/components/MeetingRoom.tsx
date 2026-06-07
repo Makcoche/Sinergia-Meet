@@ -7,7 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, PhoneOff, 
   Send, Users, MessageSquare, Hand, Sparkles, Smile, ShieldAlert,
-  Loader2, CheckCircle2, ListTodo, FileText, Lock, Link
+  Loader2, CheckCircle2, ListTodo, FileText, Lock, Link, Clock
 } from 'lucide-react';
 import { User, ChatMessage, Participant } from '../types';
 import { apiFetch, directDb } from '../utils/api';
@@ -43,6 +43,7 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
   const [dbParticipants, setDbParticipants] = useState<Participant[]>([]);
   const [showSimulated, setShowSimulated] = useState<boolean>(false);
   const [meetingHostId, setMeetingHostId] = useState<string>('');
+  const [amIInWaitingRoom, setAmIInWaitingRoom] = useState<boolean>(false);
 
   // Combined participants getter
   const participants = showSimulated 
@@ -101,22 +102,24 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
   }, []);
 
   // Helper to sync our presence to Firestore
-  const updateOurPresence = async (muted: boolean, videoOff: boolean, hand: boolean) => {
+  const updateOurPresence = async (muted: boolean, videoOff: boolean, hand: boolean, waiting: boolean = amIInWaitingRoom, customHostId: string = meetingHostId) => {
     if (!directDb) return;
     try {
       const partId = `${meetingId}_${user.id}`;
+      const isUserHost = user.id === customHostId || (!customHostId && user.role === 'ADMIN');
       await setDoc(doc(directDb, 'meetingParticipants', partId), {
         id: partId,
         meetingId,
         userId: user.id,
         name: user.name,
         avatar: user.avatar || '',
-        role: user.id === meetingHostId || (!meetingHostId && user.role === 'ADMIN') ? 'HOST' : 'ATTENDEE',
+        role: isUserHost ? 'HOST' : 'ATTENDEE',
         isMuted: muted,
         isVideoOff: videoOff,
         handRaised: hand,
         joinedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
+        isInWaitingRoom: waiting
       }, { merge: true });
     } catch (e) {
       console.warn('[Presence] Error updating presence:', e);
@@ -173,9 +176,9 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
         const data = snapDoc.data() as any;
         // Don't include ourselves in the remote stream list (as we are rendered specially)
         if (data.userId !== user.id) {
-          // Prevent ghost/zombie participants by verifying the heartbeat is active (within last 15 seconds)
+          // Prevent ghost/zombie participants by verifying the heartbeat is active (within last 120 seconds to be clock-skew robust)
           const updatedAtTime = data.updatedAt ? new Date(data.updatedAt).getTime() : 0;
-          if (now - updatedAtTime < 15000) {
+          if (now - updatedAtTime < 120000) {
             list.push(data as Participant);
           }
         }
@@ -188,7 +191,7 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
     return () => unsubscribe();
   }, [meetingId, user.id]);
 
-  // Host Remote Regulation Listener (Kicked / Silenced by Host)
+  // Host Remote Regulation Listener (Kicked / Silenced / Admitted by Host)
   useEffect(() => {
     if (!directDb) return;
     const partId = `${meetingId}_${user.id}`;
@@ -205,6 +208,10 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
           if (localStream) {
             localStream.getAudioTracks().forEach(track => track.enabled = false);
           }
+        }
+        
+        if (data.isInWaitingRoom !== undefined) {
+          setAmIInWaitingRoom(data.isInWaitingRoom);
         }
       }
     });
@@ -265,6 +272,17 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
         const found = data.find((m: any) => m.id === meetingId);
         if (found) {
           setMeetingTitle(found.title);
+          const currentHostId = found.hostId || '';
+          setMeetingHostId(currentHostId);
+          
+          const isUserHost = user.id === currentHostId || (!currentHostId && user.role === 'ADMIN');
+          if (found.waitingRoom && !isUserHost) {
+            setAmIInWaitingRoom(true);
+            await updateOurPresence(isMuted, isVideoOff, handRaised, true, currentHostId);
+          } else {
+            setAmIInWaitingRoom(false);
+            await updateOurPresence(isMuted, isVideoOff, handRaised, false, currentHostId);
+          }
         }
       }
     } catch (e) {
@@ -396,6 +414,45 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
       setAiGenerating(false);
     }
   };
+
+  if (amIInWaitingRoom) {
+    return (
+      <div className="h-[90vh] flex items-center justify-center bg-[#0F172A] border border-slate-800 rounded-3xl p-6 relative overflow-hidden" id="waiting-room-screen">
+        <div className="absolute top-[-20%] right-[-20%] w-[400px] h-[400px] bg-amber-500/5 rounded-full blur-[100px] pointer-events-none"></div>
+        <div className="absolute bottom-[-20%] left-[-20%] w-[400px] h-[400px] bg-blue-500/5 rounded-full blur-[100px] pointer-events-none"></div>
+
+        <div className="max-w-md w-full bg-slate-900/80 border border-slate-800 rounded-2xl p-8 text-center space-y-6 relative z-10 shadow-2xl backdrop-blur-md">
+          <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-full flex items-center justify-center mx-auto animate-pulse">
+            <Clock className="w-8 h-8" />
+          </div>
+
+          <div className="space-y-2">
+            <span className="text-[10px] font-mono font-bold tracking-wider text-amber-400 bg-amber-500/10 py-1 px-3 rounded-full uppercase border border-amber-500/20">
+              SALA DE ESPERA ACTIVA
+            </span>
+            <h2 className="text-xl font-display font-bold text-white tracking-tight pt-2">{meetingTitle}</h2>
+            <p className="text-xs text-[#94A3B8] leading-relaxed">
+              Hola, <span className="text-white font-semibold">{user.name}</span>. Has solicitado unirte a la videoconferencia. Por favor, aguarda a que el anfitrión autorice tu ingreso desde su panel de moderación.
+            </p>
+          </div>
+
+          <div className="border-t border-slate-800 pt-5 flex flex-col gap-3">
+            <div className="text-[10px] text-slate-500 font-mono flex items-center justify-center gap-1.5 uppercase">
+              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-500" /> Consultando autorización en tiempo real...
+            </div>
+            
+            <button
+              id="btn-quit-waiting-room"
+              onClick={onExit}
+              className="mt-2 w-full py-2.5 rounded-xl bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white font-semibold text-xs uppercase tracking-wider transition-all cursor-pointer border border-slate-700"
+            >
+              Salir de la sala
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="h-[90vh] flex flex-col lg:flex-row gap-4 relative" id="live-meeting-room">
