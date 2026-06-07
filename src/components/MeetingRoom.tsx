@@ -10,13 +10,21 @@ import {
   Loader2, CheckCircle2, ListTodo, FileText, Lock, Link
 } from 'lucide-react';
 import { User, ChatMessage, Participant } from '../types';
-import { apiFetch } from '../utils/api';
+import { apiFetch, directDb } from '../utils/api';
+import { onSnapshot, collection, doc, setDoc, deleteDoc, query, where } from 'firebase/firestore';
 
 interface MeetingRoomProps {
   meetingId: string;
   user: User;
   onExit: () => void;
 }
+
+// Active callers simulation database (realistic behavior with audio speaker cues)
+const SIMULATED_PARTICIPANTS: Participant[] = [
+  { id: 'part-1', userId: 'user-1', name: 'Ana Milena (Sinergia)', role: 'PRESENTER', isMuted: false, isVideoOff: false, handRaised: false, joinedAt: new Date().toISOString(), isInWaitingRoom: false },
+  { id: 'part-2', userId: 'user-2', name: 'Carlos Mendoza (CTO)', role: 'ATTENDEE', isMuted: false, isVideoOff: false, handRaised: false, joinedAt: new Date().toISOString(), isInWaitingRoom: false },
+  { id: 'part-3', userId: 'user-guest', name: 'Andrés García (Inversionista)', role: 'ATTENDEE', isMuted: true, isVideoOff: true, handRaised: false, joinedAt: new Date().toISOString(), isInWaitingRoom: true },
+];
 
 export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProps) {
   const [meetingTitle, setMeetingTitle] = useState('Reunión Sinergia S.A.S.');
@@ -31,12 +39,17 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState('');
 
-  // Active callers simulation database (realistic behavior with audio speaker cues)
-  const [participants, setParticipants] = useState<Participant[]>([
-    { id: 'part-1', userId: 'user-1', name: 'Ana Milena (Sinergia)', role: 'PRESENTER', isMuted: false, isVideoOff: false, handRaised: false, joinedAt: new Date().toISOString(), isInWaitingRoom: false },
-    { id: 'part-2', userId: 'user-2', name: 'Carlos Mendoza (CTO)', role: 'ATTENDEE', isMuted: false, isVideoOff: false, handRaised: false, joinedAt: new Date().toISOString(), isInWaitingRoom: false },
-    { id: 'part-3', userId: 'user-guest', name: 'Andrés García (Inversionista)', role: 'ATTENDEE', isMuted: true, isVideoOff: true, handRaised: false, joinedAt: new Date().toISOString(), isInWaitingRoom: true },
-  ]);
+  // Active callers REAL & SIMULATED state
+  const [dbParticipants, setDbParticipants] = useState<Participant[]>([]);
+  const [showSimulated, setShowSimulated] = useState<boolean>(false);
+  const [meetingHostId, setMeetingHostId] = useState<string>('');
+
+  // Combined participants getter
+  const participants = showSimulated 
+    ? [...dbParticipants, ...SIMULATED_PARTICIPANTS] 
+    : dbParticipants;
+
+  const isHost = user.id === meetingHostId || (!meetingHostId && user.role === 'ADMIN');
 
   const [activeSpeaker, setActiveSpeaker] = useState<string>('local'); // 'local', 'part-1', 'part-2'
   const [chatOpen, setChatOpen] = useState(true);
@@ -80,14 +93,129 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
 
     return () => {
       // Clean up Stream
-      if (localStream) {
-        localStream.getTracks().forEach(track => track.stop());
+      if (localVideoRef.current && localVideoRef.current.srcObject) {
+        const str = localVideoRef.current.srcObject as MediaStream;
+        str.getTracks().forEach(track => track.stop());
       }
     };
   }, []);
 
+  // Helper to sync our presence to Firestore
+  const updateOurPresence = async (muted: boolean, videoOff: boolean, hand: boolean) => {
+    if (!directDb) return;
+    try {
+      const partId = `${meetingId}_${user.id}`;
+      await setDoc(doc(directDb, 'meetingParticipants', partId), {
+        id: partId,
+        meetingId,
+        userId: user.id,
+        name: user.name,
+        avatar: user.avatar || '',
+        role: user.id === meetingHostId || (!meetingHostId && user.role === 'ADMIN') ? 'HOST' : 'ATTENDEE',
+        isMuted: muted,
+        isVideoOff: videoOff,
+        handRaised: hand,
+        joinedAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+    } catch (e) {
+      console.warn('[Presence] Error updating presence:', e);
+    }
+  };
+
+  // Sync our media controls and metadata state whenever it changes
+  useEffect(() => {
+    updateOurPresence(isMuted, isVideoOff, handRaised);
+  }, [isMuted, isVideoOff, handRaised, meetingId, user.id, meetingHostId]);
+
+  // Periodic heartbeat to prevent timeout on other clients' grids
+  useEffect(() => {
+    const presenceHeartbeat = setInterval(() => {
+      updateOurPresence(isMuted, isVideoOff, handRaised);
+    }, 5000);
+
+    return () => clearInterval(presenceHeartbeat);
+  }, [isMuted, isVideoOff, handRaised, meetingId, user.id, meetingHostId]);
+
+  // Remove our presence record on unmount / window unload
+  useEffect(() => {
+    const removePresence = async () => {
+      if (directDb) {
+        const partId = `${meetingId}_${user.id}`;
+        try {
+          await deleteDoc(doc(directDb, 'meetingParticipants', partId));
+        } catch (e) {
+          // ignore
+        }
+      }
+    };
+
+    window.addEventListener('beforeunload', removePresence);
+    return () => {
+      window.removeEventListener('beforeunload', removePresence);
+      removePresence();
+    };
+  }, [meetingId, user.id]);
+
+  // Listen to other users' presence from Firestore in real-time
+  useEffect(() => {
+    if (!directDb) return;
+
+    const q = query(
+      collection(directDb, 'meetingParticipants'),
+      where('meetingId', '==', meetingId)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list: Participant[] = [];
+      const now = Date.now();
+      snapshot.forEach((snapDoc) => {
+        const data = snapDoc.data() as any;
+        // Don't include ourselves in the remote stream list (as we are rendered specially)
+        if (data.userId !== user.id) {
+          // Prevent ghost/zombie participants by verifying the heartbeat is active (within last 15 seconds)
+          const updatedAtTime = data.updatedAt ? new Date(data.updatedAt).getTime() : 0;
+          if (now - updatedAtTime < 15000) {
+            list.push(data as Participant);
+          }
+        }
+      });
+      setDbParticipants(list);
+    }, (error) => {
+      console.error('[Firestore Participants Listener]', error);
+    });
+
+    return () => unsubscribe();
+  }, [meetingId, user.id]);
+
+  // Host Remote Regulation Listener (Kicked / Silenced by Host)
+  useEffect(() => {
+    if (!directDb) return;
+    const partId = `${meetingId}_${user.id}`;
+    
+    const unsubscribe = onSnapshot(doc(directDb, 'meetingParticipants', partId), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data.kicked) {
+          alert('Has sido expulsado de la reunión por el anfitrión.');
+          onExit();
+        } else if (data.isMuted && !isMuted) {
+          setIsMuted(true);
+          // Update actual stream track state
+          if (localStream) {
+            localStream.getAudioTracks().forEach(track => track.enabled = false);
+          }
+        }
+      }
+    });
+
+    return () => unsubscribe();
+  }, [meetingId, user.id, isMuted, localStream]);
+
   // Periodic simulated transcriptions and active speaker switching to represent live conversation state
   useEffect(() => {
+    if (!showSimulated) return;
+
     const dialogs = [
       { speaker: 'Ana Milena (Sinergia)', statement: 'El despliegue en VPS Ubuntu usando Docker Compose corre de forma sumamente veloz.' },
       { speaker: 'Carlos Mendoza (CTO)', statement: 'Completamente de acuerdo, la base de datos PostgreSQL y la encriptación AES-256 garantizan la seguridad empresarial.' },
@@ -112,10 +240,10 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
         setActiveSpeaker('local');
         clearInterval(interval);
       }
-    }, 18000); // add dialogue every 18 seconds
+    }, 12000); // add dialogue slightly faster in simulation mode (12s)
 
     return () => clearInterval(interval);
-  }, []);
+  }, [showSimulated]);
 
   const addParagraphToServer = async (text: string) => {
     try {
@@ -200,19 +328,40 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
   };
 
   // Host Action: Kick Participant
-  const handleKickParticipant = (id: string, name: string) => {
-    setParticipants(prev => prev.filter(p => p.id !== id));
+  const handleKickParticipant = async (id: string, name: string) => {
+    if (directDb) {
+      try {
+        await setDoc(doc(directDb, 'meetingParticipants', id), { kicked: true }, { merge: true });
+      } catch (e) {
+        console.warn('Fallo expulsar en Firestore:', e);
+      }
+    }
+    setDbParticipants(prev => prev.filter(p => p.id !== id));
     setTranscriptsLog(prev => [...prev, `[SISTEMA]: El anfitrión expulsó a ${name} de la reunión.`]);
   };
 
   // Host Action: Mute Participant
-  const handleMuteParticipant = (id: string) => {
-    setParticipants(prev => prev.map(p => p.id === id ? { ...p, isMuted: true } : p));
+  const handleMuteParticipant = async (id: string) => {
+    if (directDb) {
+      try {
+        await setDoc(doc(directDb, 'meetingParticipants', id), { isMuted: true }, { merge: true });
+      } catch (e) {
+        console.warn('Fallo silenciar en Firestore:', e);
+      }
+    }
+    setDbParticipants(prev => prev.map(p => p.id === id ? { ...p, isMuted: true } : p));
   };
 
   // Host Action: Accept Participant in Waiting Room
-  const handleAcceptParticipant = (id: string) => {
-    setParticipants(prev => prev.map(p => p.id === id ? { ...p, isInWaitingRoom: false } : p));
+  const handleAcceptParticipant = async (id: string) => {
+    if (directDb) {
+      try {
+        await setDoc(doc(directDb, 'meetingParticipants', id), { isInWaitingRoom: false }, { merge: true });
+      } catch (e) {
+        console.warn('Fallo admitir en Firestore:', e);
+      }
+    }
+    setDbParticipants(prev => prev.map(p => p.id === id ? { ...p, isInWaitingRoom: false } : p));
   };
 
   // Generate AI Summaries via server-side Gemini request
@@ -290,8 +439,8 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
               }}
               className={`py-1.5 px-3 rounded-lg border text-[10px] font-semibold transition-all flex items-center gap-1.5 cursor-pointer uppercase ${
                 copySuccess
-                  ? 'bg-emerald-500/10 text-emerald-350 border-emerald-500/23'
-                  : 'bg-slate-800 hover:bg-slate-750 text-slate-300 border-slate-700'
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
               }`}
             >
               <Link className="w-3 h-3 text-current" />
@@ -310,7 +459,7 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
                 <div className="w-16 h-16 rounded-full bg-slate-800 text-slate-300 font-display flex items-center justify-center text-xl font-bold uppercase">
                   {user.name.substring(0, 2)}
                 </div>
-                <span className="text-xs text-slate-500 mt-3">{user.name} (Anfitrión)</span>
+                <span className="text-xs text-slate-500 mt-3">{user.name} {isHost ? '(Anfitrión)' : '(Participante)'}</span>
               </div>
             ) : (
               <div className="w-full h-full relative">
@@ -327,17 +476,17 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
                   <div className="absolute inset-0 bg-gradient-to-tr from-blue-700/20 to-slate-900 flex flex-col items-center justify-center">
                     <img 
                       referrerPolicy="no-referrer"
-                      src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=180&h=180&q=80" 
+                      src={user.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=180&h=180&q=80"} 
                       alt={user.name}
                       className="w-16 h-16 rounded-full border border-blue-500/40 shadow-md object-cover"
                     />
-                    <span className="text-xs text-slate-300 mt-2 font-display text-center">{user.name} (Anfitrión)</span>
+                    <span className="text-xs text-slate-300 mt-2 font-display text-center">{user.name} {isHost ? '(Anfitrión)' : '(Participante)'}</span>
                   </div>
                 )}
 
                 <div className="absolute bottom-2 left-2 bg-slate-950/80 border border-slate-800/80 py-1 px-3 rounded-lg text-[11px] font-mono flex items-center gap-1.5 z-10 text-slate-200">
                   {isMuted ? <MicOff className="w-3.5 h-3.5 text-red-400" /> : <Mic className="w-3.5 h-3.5 text-emerald-400" />}
-                  Tú (Anfitrión) {handRaised && <Hand className="w-3 h-3 text-yellow-400 fill-current ml-1" />}
+                  Tú {isHost ? '(Anfitrión)' : `(${user.name})`} {handRaised && <Hand className="w-3 h-3 text-yellow-400 fill-current ml-1" />}
                 </div>
               </div>
             )}
@@ -363,10 +512,12 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
                   <div className="w-full h-full relative">
                     <img 
                       referrerPolicy="no-referrer"
-                      src={caller.userId === 'user-1' 
+                      src={caller.avatar || (caller.userId === 'user-1' 
                         ? "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=640&h=480&q=80"
-                        : "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=640&h=480&q=80"
-                      } 
+                        : caller.userId === 'user-2'
+                          ? "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=640&h=480&q=80"
+                          : `https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=640&h=480&q=80`
+                      )} 
                       alt={caller.name}
                       className="w-full h-full object-cover"
                     />
@@ -418,38 +569,38 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
               onClick={handleToggleMute}
               className={`p-3 rounded-xl border transition-all cursor-pointer ${
                 isMuted 
-                  ? 'bg-rose-500/20 text-rose-400 border-rose-500/30' 
-                  : 'bg-slate-800/80 text-gray-350 border-slate-700 hover:bg-slate-700'
+                  ? 'bg-rose-500/20 border-rose-500/30' 
+                  : 'bg-slate-800/80 border-slate-700 hover:bg-slate-700'
               }`}
             >
-              {isMuted ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+              {isMuted ? <MicOff className="w-5 h-5 text-rose-400" /> : <Mic className="w-5 h-5 text-emerald-400" />}
             </button>
             <button 
               id="btn-live-video"
               onClick={handleToggleVideo}
               className={`p-3 rounded-xl border transition-all cursor-pointer ${
                 isVideoOff 
-                  ? 'bg-rose-500/20 text-rose-400 border-rose-500/30' 
-                  : 'bg-slate-800/80 text-gray-350 border-slate-700 hover:bg-slate-700'
+                  ? 'bg-rose-500/20 border-rose-500/30' 
+                  : 'bg-slate-800/80 border-slate-700 hover:bg-slate-700'
               }`}
             >
-              {isVideoOff ? <VideoOff className="w-5 h-5" /> : <VideoIcon className="w-5 h-5" />}
+              {isVideoOff ? <VideoOff className="w-5 h-5 text-rose-400" /> : <VideoIcon className="w-5 h-5 text-[#3B82F6]" />}
             </button>
             <button 
               id="btn-live-screenshare"
               onClick={() => setIsScreenSharing(!isScreenSharing)}
               className={`p-3 rounded-xl border transition-all cursor-pointer ${
                 isScreenSharing 
-                  ? 'bg-blue-600/20 text-blue-400 border-blue-600/30' 
-                  : 'bg-slate-800/80 text-gray-350 border-slate-700 hover:bg-slate-700'
+                  ? 'bg-blue-600/20 border-blue-600/30' 
+                  : 'bg-slate-800/80 border-slate-700 hover:bg-slate-700'
               }`}
             >
-              <Monitor className="w-5 h-5" />
+              <Monitor className={`w-5 h-5 ${isScreenSharing ? 'text-blue-400' : 'text-slate-300'}`} />
             </button>
           </div>
 
           {/* Quick Reaction Board */}
-          <div className="hidden sm:flex gap-1.5 bg-slate-850/40 py-1.5 px-3 rounded-xl border border-slate-850">
+          <div className="hidden sm:flex gap-1.5 bg-slate-800/40 py-1.5 px-3 rounded-xl border border-slate-800">
             <button id="btn-react-clap" onClick={() => triggerReaction('👏')} className="hover:scale-125 transition-transform text-sm cursor-pointer">👏</button>
             <button id="btn-react-heart" onClick={() => triggerReaction('❤️')} className="hover:scale-125 transition-transform text-sm cursor-pointer">❤️</button>
             <button id="btn-react-fire" onClick={() => triggerReaction('🔥')} className="hover:scale-125 transition-transform text-sm cursor-pointer">🔥</button>
@@ -494,7 +645,7 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
             </h5>
             <div className="space-y-1.5 max-h-32 overflow-y-auto">
               {participants.filter(p => p.isInWaitingRoom).map(guest => (
-                <div key={guest.id} className="flex justify-between items-center bg-white p-2.5 rounded-lg border border-amber-150">
+                <div key={guest.id} className="flex justify-between items-center bg-white p-2.5 rounded-lg border border-amber-200">
                   <span className="text-xs font-bold text-slate-800">{guest.name}</span>
                   <button 
                     id={`btn-admit-caller-${guest.id}`}
@@ -524,7 +675,7 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
             {aiResult ? (
               <div className="space-y-3 text-slate-800">
                 <div className="space-y-1 bg-emerald-50 border border-emerald-100 p-2.5 rounded-lg">
-                  <span className="text-[10px] font-bold text-emerald-750 font-mono flex items-center gap-1">
+                  <span className="text-[10px] font-bold text-emerald-700 font-mono flex items-center gap-1">
                     <CheckCircle2 className="w-3 h-3 text-emerald-600" /> RESUMEN EJECUTIVO
                   </span>
                   <p className="text-slate-800 leading-relaxed text-[11px] font-medium">{aiResult.summary}</p>
@@ -579,6 +730,34 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
               </>
             )}
           </button>
+        </div>
+
+        {/* DEMO / TEST ACTION CONTROLS */}
+        <div className="p-4 rounded-2xl bg-white border border-slate-200 space-y-2.5 shadow-sm text-slate-800">
+          <div className="flex justify-between items-center pb-1.5 border-b border-slate-100">
+            <h4 className="text-[10px] font-bold font-mono text-slate-500 uppercase tracking-wider">
+              🧪  Simulación de Prueba (QA)
+            </h4>
+            <span className="text-[9px] font-mono text-[#3B82F6] font-bold">Opcional</span>
+          </div>
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-slate-600">Simular participantes ficticios:</span>
+            <button
+              id="btn-toggle-demo-simulation"
+              type="button"
+              onClick={() => setShowSimulated(!showSimulated)}
+              className={`py-1 px-3 border rounded-lg text-[10px] font-bold transition-all cursor-pointer shadow-sm ${
+                showSimulated 
+                  ? 'bg-[#3B82F6] border-[#3B82F6] text-white' 
+                  : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300'
+              }`}
+            >
+              {showSimulated ? 'ACTIVO (3 Falsos)' : 'DESACTIVADO (Solo real)'}
+            </button>
+          </div>
+          <p className="text-[9px] text-slate-400 leading-normal font-mono">
+            * Desactívalo para probar una conexión 100% limpia con otro usuario real en otro navegador/pestaña o dispositivo. Actívalo si deseas rellenar la sala con participantes ficticios (Ana Milena, Carlos, Andrés) para demostrar la IA de transcripción.
+          </p>
         </div>
 
         {/* CHAT TAB PANEL (Lower panel) */}

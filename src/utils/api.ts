@@ -16,7 +16,7 @@ import {
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Initialize direct Firestore db client
-let directDb: any = null;
+export let directDb: any = null;
 try {
   const firebaseApp = initializeApp(firebaseConfig);
   directDb = initializeFirestore(firebaseApp, {
