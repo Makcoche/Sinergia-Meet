@@ -33,10 +33,24 @@ export default function App() {
   });
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    // Check sessionStorage for active guest session first
+    const guestSaved = sessionStorage.getItem('sinergia_guest_user');
+    if (guestSaved) {
+      try {
+        return JSON.parse(guestSaved);
+      } catch (e) { /* ignore */ }
+    }
+
     const saved = localStorage.getItem('sinergia_user');
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        // Clear guest session from localStorage to prevent permanent device lockout
+        if (parsed.role === 'GUEST') {
+          localStorage.removeItem('sinergia_user');
+          return null;
+        }
+        return parsed;
       } catch (e) {
         return null;
       }
@@ -136,7 +150,7 @@ export default function App() {
     }
     const guestUser: User = {
       id: `guest-${Math.random().toString(36).substring(2, 11)}`,
-      name: `${authName.trim()} (Invitado)`,
+      name: authName.trim(),
       email: `guest-${Date.now()}@sinergia.temp`,
       role: 'GUEST',
       status: 'ACTIVE',
@@ -144,7 +158,7 @@ export default function App() {
       avatar: `https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&h=150&q=80`
     };
     setCurrentUser(guestUser);
-    localStorage.setItem('sinergia_user', JSON.stringify(guestUser));
+    sessionStorage.setItem('sinergia_guest_user', JSON.stringify(guestUser));
   };
 
   // Authenticate user with Backend
@@ -251,6 +265,7 @@ export default function App() {
   const handleLogout = () => {
     setCurrentUser(null);
     localStorage.removeItem('sinergia_user');
+    sessionStorage.removeItem('sinergia_guest_user');
     setActiveTab('DASHBOARD');
     setActiveMeetingId(null);
   };
@@ -444,6 +459,18 @@ export default function App() {
     );
   }
 
+  const handleUpdateUserName = (newName: string) => {
+    if (currentUser) {
+      const updated = { ...currentUser, name: newName };
+      setCurrentUser(updated);
+      if (currentUser.role === 'GUEST') {
+        sessionStorage.setItem('sinergia_guest_user', JSON.stringify(updated));
+      } else {
+        localStorage.setItem('sinergia_user', JSON.stringify(updated));
+      }
+    }
+  };
+
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-800 flex flex-col md:flex-row relative font-sans">
       
@@ -629,6 +656,7 @@ export default function App() {
               setActiveMeetingId(null);
               setActiveTab('DASHBOARD');
             }}
+            onUpdateName={handleUpdateUserName}
           />
         )}
 

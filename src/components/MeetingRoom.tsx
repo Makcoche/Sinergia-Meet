@@ -7,7 +7,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, PhoneOff, 
   Send, Users, MessageSquare, Hand, Sparkles, Smile, ShieldAlert,
-  Loader2, CheckCircle2, ListTodo, FileText, Lock, Link, Clock
+  Loader2, CheckCircle2, ListTodo, FileText, Lock, Link, Clock,
+  Edit3, Check, X
 } from 'lucide-react';
 import { User, ChatMessage, Participant } from '../types';
 import { apiFetch, directDb } from '../utils/api';
@@ -17,6 +18,7 @@ interface MeetingRoomProps {
   meetingId: string;
   user: User;
   onExit: () => void;
+  onUpdateName?: (newName: string) => void;
 }
 
 // Active callers simulation database (realistic behavior with audio speaker cues)
@@ -100,7 +102,7 @@ function createFullyVirtualStream(username: string): MediaStream {
   return stream;
 }
 
-export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProps) {
+export default function MeetingRoom({ meetingId, user, onExit, onUpdateName }: MeetingRoomProps) {
   const [meetingTitle, setMeetingTitle] = useState('Reunión Sinergia S.A.S.');
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
@@ -125,6 +127,25 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
     : dbParticipants;
 
   const isHost = user.id === meetingHostId || (!meetingHostId && user.role === 'ADMIN');
+
+  // Interactive Rename state for self display name
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [tempName, setTempName] = useState(user.name);
+
+  useEffect(() => {
+    setTempName(user.name);
+  }, [user.name]);
+
+  const handleSaveName = async () => {
+    if (!tempName.trim()) return;
+    if (onUpdateName) {
+      onUpdateName(tempName.trim());
+    }
+    setIsEditingName(false);
+    setTimeout(() => {
+      updateOurPresence(isMuted, isVideoOff, handRaised, amIInWaitingRoom);
+    }, 100);
+  };
 
   const [activeSpeaker, setActiveSpeaker] = useState<string>('local'); // 'local', 'part-1', 'part-2'
   const [chatOpen, setChatOpen] = useState(true);
@@ -404,6 +425,30 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
     });
   }, [isMuted, isVideoOff, localStream]);
 
+  // 1.7 Automatically sync and attach dynamic localStream tracks to all active peer connections
+  useEffect(() => {
+    if (!localStream) return;
+    
+    Object.keys(peerConnectionsRef.current).forEach(targetPartId => {
+      const pc = peerConnectionsRef.current[targetPartId];
+      if (pc) {
+        const senders = pc.getSenders();
+        localStream.getTracks().forEach(track => {
+          const existingSender = senders.find(s => s.track && s.track.kind === track.kind);
+          if (!existingSender) {
+            console.log(`[WebRTC Track Sync] 🚀 Añadiendo pista (${track.kind}) tardía a PeerConnection: ${targetPartId}`);
+            pc.addTrack(track, localStream);
+          } else if (existingSender.track !== track) {
+            console.log(`[WebRTC Track Sync] 🔄 Reemplazando pista (${track.kind}) en PeerConnection: ${targetPartId}`);
+            existingSender.replaceTrack(track).catch(err => {
+              console.warn('[WebRTC replaceTrack failed]', err);
+            });
+          }
+        });
+      }
+    });
+  }, [localStream]);
+
   // 2. Proactive handshakes logic using lexicographical glare resolving guidelines
   useEffect(() => {
     if (!localStream) return;
@@ -666,17 +711,19 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
 
   // Sync our media controls and metadata state whenever it changes
   useEffect(() => {
+    if (!localStream) return; // Prevent publishing presence before streams are established
     updateOurPresence(isMuted, isVideoOff, handRaised, amIInWaitingRoom);
-  }, [isMuted, isVideoOff, handRaised, meetingId, partId, meetingHostId, amIInWaitingRoom]);
+  }, [isMuted, isVideoOff, handRaised, meetingId, partId, meetingHostId, amIInWaitingRoom, localStream]);
 
   // Periodic heartbeat to prevent timeout on other clients' grids
   useEffect(() => {
+    if (!localStream) return; // Prevent heartbeat before streams are established
     const presenceHeartbeat = setInterval(() => {
       updateOurPresence(isMuted, isVideoOff, handRaised, amIInWaitingRoom);
     }, 5000);
 
     return () => clearInterval(presenceHeartbeat);
-  }, [isMuted, isVideoOff, handRaised, meetingId, partId, meetingHostId, amIInWaitingRoom]);
+  }, [isMuted, isVideoOff, handRaised, meetingId, partId, meetingHostId, amIInWaitingRoom, localStream]);
 
   // Remove our presence record on unmount / window unload
   useEffect(() => {
@@ -714,9 +761,9 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
 
         // Don't include ourselves in the remote stream list (as we are rendered specially)
         if (data.id !== partId) {
-          // Prevent ghost/zombie participants by verifying the heartbeat is active (within last 120 seconds to be clock-skew robust)
+          // Prevent ghost/zombie participants by verifying the heartbeat is active (within last 15 seconds to be clock-skew robust)
           const updatedAtTime = data.updatedAt ? new Date(data.updatedAt).getTime() : 0;
-          if (now - updatedAtTime < 120000) {
+          if (now - updatedAtTime < 15000) {
             // Suffix name if same user account to prevent UI confusion
             const suffix = data.userId === user.id ? ' (Otro Dispositivo)' : '';
             list.push({
@@ -1394,26 +1441,67 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
 
           <div className="space-y-3 max-h-56 overflow-y-auto pr-1">
             {/* Local Client (You) */}
-            <div className="flex justify-between items-center p-2 rounded-xl bg-slate-50 border border-slate-100">
-              <div className="flex items-center gap-2 truncate">
-                <img 
-                  referrerPolicy="no-referrer"
-                  src={user.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&h=100&q=80'} 
-                  alt={user.name} 
-                  className="w-7 h-7 rounded-full object-cover border border-slate-200"
-                />
-                <div className="truncate">
-                  <p className="text-xs font-bold text-slate-800 truncate">Tú ({user.name})</p>
-                  <span className="text-[9px] text-[#3B82F6] font-mono uppercase font-semibold">{isHost ? 'Host' : 'Participante'}</span>
+            <div className="p-2 rounded-xl bg-slate-50 border border-slate-100 flex flex-col gap-2">
+              <div className="flex justify-between items-center w-full">
+                <div className="flex items-center gap-2 truncate">
+                  <img 
+                    referrerPolicy="no-referrer"
+                    src={user.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&h=100&q=80'} 
+                    alt={user.name} 
+                    className="w-7 h-7 rounded-full object-cover border border-slate-200"
+                  />
+                  
+                  {isEditingName ? (
+                    <div className="flex items-center gap-1">
+                      <input
+                        id="rename-self-input"
+                        type="text"
+                        value={tempName}
+                        onChange={(e) => setTempName(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleSaveName()}
+                        className="bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs text-slate-800 focus:ring-1 focus:ring-blue-500 outline-none w-28 font-semibold"
+                        autoFocus
+                      />
+                      <button 
+                        onClick={handleSaveName}
+                        className="p-1 bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded transition-colors"
+                        title="Guardar nombre"
+                      >
+                        <Check className="w-3 h-3" />
+                      </button>
+                      <button 
+                        onClick={() => { setIsEditingName(false); setTempName(user.name); }}
+                        className="p-1 bg-red-100 text-red-700 hover:bg-red-200 rounded transition-colors"
+                        title="Cancelar"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="truncate flex items-center gap-1.5 group">
+                      <div className="truncate text-left">
+                        <p className="text-xs font-bold text-slate-800 truncate" title={user.name}>Tú ({user.name})</p>
+                        <span className="text-[9px] text-[#3B82F6] font-mono uppercase font-semibold">{isHost ? 'Host' : 'Participante'}</span>
+                      </div>
+                      <button
+                        onClick={() => { setIsEditingName(true); setTempName(user.name); }}
+                        className="p-1 text-slate-400 hover:text-blue-500 rounded hover:bg-slate-200 transition-colors cursor-pointer animate-fade-in"
+                        title="Editar nombre"
+                      >
+                        <Edit3 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
                 </div>
-              </div>
-              <div className="flex gap-1">
-                <span className={`p-1 rounded ${isMuted ? 'bg-red-50 text-red-500 border border-red-100' : 'bg-emerald-50 text-emerald-600 border border-emerald-110'}`} title={isMuted ? "Micrófono Silenciado" : "Micrófono Encendido"}>
-                  {isMuted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
-                </span>
-                <span className={`p-1 rounded ${isVideoOff ? 'bg-red-50 text-red-500 border border-red-100' : 'bg-blue-50 text-blue-600 border border-blue-110'}`} title={isVideoOff ? "Cámara Apagada" : "Cámara Encendida"}>
-                  {isVideoOff ? <VideoOff className="w-3.5 h-3.5" /> : <VideoIcon className="w-3.5 h-3.5" />}
-                </span>
+                
+                <div className="flex gap-1 shrink-0">
+                  <span className={`p-1 rounded ${isMuted ? 'bg-red-50 text-red-500 border border-red-100' : 'bg-emerald-50 text-emerald-600 border border-emerald-110'}`} title={isMuted ? "Micrófono Silenciado" : "Micrófono Encendido"}>
+                    {isMuted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+                  </span>
+                  <span className={`p-1 rounded ${isVideoOff ? 'bg-red-50 text-red-500 border border-red-100' : 'bg-blue-50 text-blue-600 border border-blue-110'}`} title={isVideoOff ? "Cámara Apagada" : "Cámara Encendida"}>
+                    {isVideoOff ? <VideoOff className="w-3.5 h-3.5" /> : <VideoIcon className="w-3.5 h-3.5" />}
+                  </span>
+                </div>
               </div>
             </div>
 
