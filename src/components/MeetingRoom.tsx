@@ -26,6 +26,80 @@ const SIMULATED_PARTICIPANTS: Participant[] = [
   { id: 'part-3', userId: 'user-guest', name: 'Andrés García (Inversionista)', role: 'ATTENDEE', isMuted: true, isVideoOff: true, handRaised: false, joinedAt: new Date().toISOString(), isInWaitingRoom: true },
 ];
 
+// Production-grade fallback virtual stream containing both audio (with silent tone) and video (animated text canvas)
+function createFullyVirtualStream(username: string): MediaStream {
+  console.log('[WebRTC Audit / Fallback] ⚡ Inicializando generador de flujo multimedia virtual para bypass de cámara...');
+  const canvas = document.createElement('canvas');
+  canvas.width = 640;
+  canvas.height = 480;
+  const ctx = canvas.getContext('2d');
+  
+  const draw = () => {
+    if (ctx) {
+      // Ambient dark grey background
+      ctx.fillStyle = '#0f172a';
+      ctx.fillRect(0, 0, 640, 480);
+      
+      // Decorative blue pulse indicating streaming
+      ctx.fillStyle = '#1e293b';
+      ctx.beginPath();
+      ctx.arc(320, 240, 60 + Math.abs(Math.sin(Date.now() / 1000)) * 20, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Elegant circular avatar mock
+      ctx.fillStyle = '#3b82f6';
+      ctx.beginPath();
+      ctx.arc(320, 240, 45, 0, Math.PI * 2);
+      ctx.fill();
+      
+      // Text uppercase initials
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 24px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(username.substring(0, 2).toUpperCase(), 320, 248);
+
+      // Name caption
+      ctx.fillStyle = '#e2e8f0';
+      ctx.font = '16px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(username, 320, 340);
+
+      // Camera off caption
+      ctx.fillStyle = '#a1a1aa';
+      ctx.font = '11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('[Cámara apagada / Virtual]', 320, 365);
+    }
+    requestAnimationFrame(draw);
+  };
+  draw();
+
+  const canvasStream = (canvas as any).captureStream ? (canvas as any).captureStream(15) : (canvas as any).webkitCaptureStream(15);
+  const videoTrack = canvasStream.getVideoTracks()[0];
+
+  // Silent audio trick via window.AudioContext
+  let audioTrack: MediaStreamTrack | null = null;
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (AudioContextClass) {
+      const audioCtx = new AudioContextClass();
+      const oscillator = audioCtx.createOscillator();
+      const dest = audioCtx.createMediaStreamDestination();
+      oscillator.connect(dest);
+      oscillator.start();
+      audioTrack = dest.stream.getAudioTracks()[0];
+      audioTrack.enabled = false; // keep silent
+    }
+  } catch (e) {
+    console.warn('[WebRTC Fallback Audio] AudioContext bloqueado o inválido:', e);
+  }
+
+  const stream = new MediaStream();
+  if (videoTrack) stream.addTrack(videoTrack);
+  if (audioTrack) stream.addTrack(audioTrack);
+  return stream;
+}
+
 export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProps) {
   const [meetingTitle, setMeetingTitle] = useState('Reunión Sinergia S.A.S.');
   const [isMuted, setIsMuted] = useState(false);
@@ -195,25 +269,55 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
 
     // Seed local tracks immediately so renegotiations are complete from step zero
     if (localStream) {
+      console.log(`[WebRTC Media Router] 🚀 Añadiendo ${localStream.getTracks().length} pistas locales al PeerConnection de: ${targetPartId}`);
       localStream.getTracks().forEach(track => {
         pc.addTrack(track, localStream);
+        console.log(`[WebRTC Audit / addTrack] 🟢 Pista local agregada [id: ${track.id}, kind: ${track.kind}] hacia: ${targetPartId}`);
       });
-      console.log(`[WebRTC Media] Añadidas pistas locales de audio/video a la conexión de: ${targetPartId}`);
+    } else {
+      console.warn(`[WebRTC Media Router] ⚠️ No hay flujo local disponible para el PeerConnection hacia: ${targetPartId}`);
     }
 
+    // High-availability track receiver with dynamic audio/video stream consolidation
     pc.ontrack = (event) => {
-      console.log(`[WebRTC Media Success] Recibiendo transmisión remota en vivo para el par: ${targetPartId}`);
-      if (event.streams && event.streams[0]) {
-        setRemoteStreams(prev => ({
+      const incomingTrack = event.track;
+      console.log(`[WebRTC Audit / ontrack] 🏁 DETECCIÓN: Recibiendo transmisión remota en vivo para el par: ${targetPartId}, Track [id: ${incomingTrack.id}, kind: ${incomingTrack.kind}]`);
+      
+      setRemoteStreams(prev => {
+        const existingStream = prev[targetPartId];
+        // Reuse existing MediaStream or fallback to the event stream or provision a new one
+        let streamToUse = existingStream || event.streams[0] || new MediaStream();
+        
+        // Safely add the track to avoid duplication crashes
+        if (!streamToUse.getTracks().some(t => t.id === incomingTrack.id)) {
+          console.log(`[WebRTC Audit / ontrack] ➕ Track (${incomingTrack.kind}) acoplado al MediaStream del par: ${targetPartId}`);
+          streamToUse.addTrack(incomingTrack);
+        }
+        
+        // Hook up lifecycle change hooks for diagnostic insights
+        incomingTrack.onended = () => {
+          console.warn(`[WebRTC Audit / ontrack] ⚠️ Pista finalizada para: ${targetPartId} (${incomingTrack.kind})`);
+        };
+        incomingTrack.onmute = () => {
+          console.log(`[WebRTC Audit / ontrack] 🔇 Pista silenciada (mutes) por hardware o red para: ${targetPartId} (${incomingTrack.kind})`);
+        };
+        incomingTrack.onunmute = () => {
+          console.log(`[WebRTC Audit / ontrack] 🔊 Pista restaurada (unmutes) para: ${targetPartId} (${incomingTrack.kind})`);
+        };
+
+        return {
           ...prev,
-          [targetPartId]: event.streams[0]
-        }));
-      }
+          [targetPartId]: streamToUse
+        };
+      });
     };
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
+        console.log(`[WebRTC Audit / onicecandidate] 🧊 Candidato ICE local disponible para: ${targetPartId} (${event.candidate.candidate.substring(0, 40)}...)`);
         sendIceCandidate(targetPartId, event.candidate);
+      } else {
+        console.log(`[WebRTC Audit / onicecandidate] ✅ Compilación de candidatos ICE finalizada para: ${targetPartId}`);
       }
     };
 
@@ -383,6 +487,15 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
             const pc = peerConnectionsRef.current[senderId];
             if (pc) {
               await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: data.sdp }));
+              
+              // Process any temporarily buffered candidate messages for the answerer!
+              if (bufferedCandidatesRef.current[senderId]) {
+                console.log(`[WebRTC signaling] Aplicando candidatos en buffer (${bufferedCandidatesRef.current[senderId].length}) de: ${senderId}`);
+                for (const cand of bufferedCandidatesRef.current[senderId]) {
+                  await pc.addIceCandidate(cand).catch(e => console.warn('[WebRTC candidate error]', e));
+                }
+                delete bufferedCandidatesRef.current[senderId];
+              }
             }
           } 
           else if (data.type === 'candidate') {
@@ -417,17 +530,90 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
   useEffect(() => {
     async function startCamera() {
       try {
+        console.log('[WebRTC Media Setup] Intentando obtener acceso a cámara/micrófono real...');
         const stream = await navigator.mediaDevices.getUserMedia({
           video: true,
           audio: true
         });
+        console.log('[WebRTC Media Setup] Acceso real concedido de forma de alta definición.');
         setLocalStream(stream);
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream;
+          localVideoRef.current.play().catch(e => console.warn('Local play blocked by browser autoplay policy', e));
         }
       } catch (err: any) {
-        console.warn('Acceso denegado a cámara o micrófono:', err);
-        setCameraError('Cámara real no disponible (Operando en modo presentación segura)');
+        console.warn('Acceso denegado a cámara o micrófono real. Intentando flujos alternativos:', err);
+        setCameraError('Cámara real no disponible (Operando en formato de conexión híbrida segura)');
+        
+        try {
+          // Attempt audio-only with mock video canvas stream
+          console.log('[WebRTC Media Setup] Intentando recuperar canal de audio real independiente...');
+          const audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          
+          // Generate active canvas track to allow peer representation
+          const canvas = document.createElement('canvas');
+          canvas.width = 640;
+          canvas.height = 480;
+          const ctx = canvas.getContext('2d');
+          
+          let animId: any;
+          const draw = () => {
+            if (ctx) {
+              ctx.fillStyle = '#0f172a';
+              ctx.fillRect(0, 0, 640, 480);
+              
+              // Draw ambient pulse
+              ctx.fillStyle = '#1e293b';
+              ctx.beginPath();
+              ctx.arc(320, 240, 50 + Math.abs(Math.sin(Date.now() / 1000)) * 15, 0, Math.PI * 2);
+              ctx.fill();
+              
+              ctx.fillStyle = '#3b82f6';
+              ctx.beginPath();
+              ctx.arc(320, 240, 40, 0, Math.PI * 2);
+              ctx.fill();
+              
+              ctx.fillStyle = '#ffffff';
+              ctx.font = 'bold 20px sans-serif';
+              ctx.textAlign = 'center';
+              ctx.fillText(user.name.substring(0, 2).toUpperCase(), 320, 247);
+              
+              ctx.fillStyle = '#e2e8f0';
+              ctx.font = '16px monospace';
+              ctx.textAlign = 'center';
+              ctx.fillText(user.name, 320, 320);
+              
+              ctx.fillStyle = '#a1a1aa';
+              ctx.font = '11px monospace';
+              ctx.textAlign = 'center';
+              ctx.fillText('[Cámara apagada / Audio activo]', 320, 350);
+            }
+            animId = requestAnimationFrame(draw);
+          };
+          draw();
+          
+          const canvasStream = (canvas as any).captureStream ? (canvas as any).captureStream(15) : (canvas as any).webkitCaptureStream(15);
+          const videoTrack = canvasStream.getVideoTracks()[0];
+          
+          const fallbackStream = new MediaStream();
+          audioStream.getTracks().forEach(t => fallbackStream.addTrack(t));
+          if (videoTrack) fallbackStream.addTrack(videoTrack);
+          
+          console.log('[WebRTC Media Setup] Concedido flujo de audio real con cámara simulada de compatibilidad.');
+          setLocalStream(fallbackStream);
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = fallbackStream;
+            localVideoRef.current.play().catch(e => console.warn('Local fallback play blocked', e));
+          }
+        } catch (audioErr) {
+          console.warn('[WebRTC Media Setup] Audio real y video real fallidos, compilando flujo virtual de compatibilidad WebRTC...', audioErr);
+          const fullyVirtualStream = createFullyVirtualStream(user.name);
+          setLocalStream(fullyVirtualStream);
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = fullyVirtualStream;
+            localVideoRef.current.play().catch(e => console.warn('Fully virtual play blocked', e));
+          }
+        }
       }
     }
 
