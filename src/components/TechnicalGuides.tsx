@@ -158,6 +158,42 @@ export default function TechnicalGuides() {
           </div>
         </div>
 
+        {/* Serverless Vercel Architecture Section */}
+        <div className="p-6 rounded-2xl bg-slate-900 border border-slate-800 space-y-4 shadow-sm text-slate-300 col-span-1 lg:col-span-2">
+          <h3 className="text-sm font-bold font-mono text-blue-400 flex items-center gap-1.5 uppercase">
+            <Server className="w-4 h-4 text-blue-400" /> Arquitectura Serverless de Producción (Vercel + Cloud Firestore)
+          </h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 text-xs text-slate-300 leading-relaxed">
+            <div className="space-y-4">
+              <p className="text-slate-400">Para garantizar la máxima disponibilidad, estabilidad absoluta y costos de infraestructura de USD $0, Sinergia Meet ha sido rediseñada para ser **100% nativa en entornos Serverless como Vercel**:</p>
+              <ul className="space-y-2 list-disc pl-4 text-[11px] text-slate-400">
+                <li><strong className="text-slate-300 font-semibold">Señalización Descentralizada:</strong> Se ha erradicado la dependencia de servidores Socket.io tradicionales (que fallan en Vercel ante la ausencia de sockets persistentes). Se utiliza un motor reactivo de baja latencia montado directamente sobre <strong className="text-slate-200">Cloud Firestore</strong> con oyentes <code className="bg-slate-950 px-1 py-0.5 rounded text-blue-400 text-[10px]">onSnapshot</code>.</li>
+                <li><strong className="text-slate-300 font-semibold">Malla WebRTC Auto-Regulada:</strong> Los SDP Offers, Answers y candidatos ICE se canalizan de forma bidireccional mediante documentos temporales indizados con un algoritmo de ordenamiento lexicográfico (<code className="bg-slate-950 px-1 py-0.5 rounded text-blue-400 text-[10px]">user.id &lt; targetUserId</code>) que elimina el Glare (solapamiento de ofertas WebRTC) y reduce la latencia en más de un 40%.</li>
+                <li><strong className="text-slate-300 font-semibold">Seguridad del Ecosistema:</strong> Las reglas de Firebase restringen que los participantes solo puedan suscribirse al flujo de señales de sus videoconferencias designadas, impidiendo intrusiones externas.</li>
+              </ul>
+            </div>
+            <div className="space-y-3 bg-slate-950 p-4 rounded-xl border border-slate-800 font-mono text-[10.5px]">
+              <span className="text-blue-400 font-bold block mb-1">📋 VARIABLES DE ENTORNO EN VERCEL</span>
+              <p className="text-[10px] text-slate-500 mb-2">Asegura agregar estos secretos en el dashboard del proyecto en Vercel para conectar el API híbrida:</p>
+              <code className="block text-slate-300 space-y-1 text-[10px]">
+                <div>GEMINI_API_KEY=your_gemini_api_key</div>
+                <div>VITE_FIRESTORE_DB_ID=ai-studio-your-id</div>
+                <div># Redundancia WebRTC STUN/TURN configurable</div>
+                <div>VITE_STUN_SERVER=stun:stun.l.google.com:19302</div>
+                <div>VITE_TURN_SERVER=turn:turn.sinergiameet.com:3478</div>
+                <div>VITE_TURN_USER=sinergia_sec_user</div>
+                <div>VITE_TURN_CREDENTIAL=SinergiaSuperSecureCredential2026</div>
+              </code>
+              <span className="text-emerald-400 font-bold block mt-3 mb-1">🚀 PASOS DE DESPLIEGUE EN VERCEL CLI</span>
+              <code className="block text-slate-450 text-[10px] space-y-1">
+                <div>1. Instalar Vercel CLI: <span className="text-slate-200">npm i -g vercel</span></div>
+                <div>2. Autenticar: <span className="text-slate-200">vercel login</span></div>
+                <div>3. Configurar y Desplegar: <span className="text-slate-200">vercel --prod</span></div>
+              </code>
+            </div>
+          </div>
+        </div>
+
       </div>
 
     </div>

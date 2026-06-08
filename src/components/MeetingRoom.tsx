@@ -70,6 +70,343 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
   // Floating reaction animation state
   const [reactions, setReactions] = useState<{ id: string; emoji: string; left: number }[]>([]);
 
+  // ============================================================================
+  // DEPLOYED PRODUCTION-GRADE WEBRTC CONFERENCING ENGINE
+  // ============================================================================
+  const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
+  
+  // Track all individual peer connections by participant user ID
+  const peerConnectionsRef = useRef<Record<string, RTCPeerConnection>>({});
+  
+  // Prevent glare by keeping track of which peers we have already initiated an offer to
+  const initiatedPeersRef = useRef<Set<string>>(new Set());
+  
+  // Idempotency guard for processed signaling documents
+  const processedSignalsRef = useRef<Set<string>>(new Set());
+  
+  // Buffer ICE Candidates if they arrive prior to remote description being set
+  const bufferedCandidatesRef = useRef<Record<string, RTCIceCandidate[]>>({});
+
+  // Helper routine to register and dispatch generated signaling payloads over Firestore
+  const sendOffer = async (targetUserId: string, offer: RTCSessionDescriptionInit) => {
+    if (!directDb) return;
+    try {
+      const signalId = `sig_off_${meetingId}_${user.id}_${targetUserId}`;
+      await setDoc(doc(directDb, 'meetingSignals', signalId), {
+        id: signalId,
+        meetingId,
+        senderId: user.id,
+        receiverId: targetUserId,
+        type: 'offer',
+        sdp: offer.sdp,
+        timestamp: new Date().toISOString()
+      }, { merge: true });
+      console.log(`[WebRTC Audit] Oferta SDP enviada correctamente a: ${targetUserId}`);
+    } catch (e) {
+      console.error('[WebRTC Offer Send Error]', e);
+    }
+  };
+
+  const sendAnswer = async (targetUserId: string, answer: RTCSessionDescriptionInit) => {
+    if (!directDb) return;
+    try {
+      const signalId = `sig_ans_${meetingId}_${user.id}_${targetUserId}`;
+      await setDoc(doc(directDb, 'meetingSignals', signalId), {
+        id: signalId,
+        meetingId,
+        senderId: user.id,
+        receiverId: targetUserId,
+        type: 'answer',
+        sdp: answer.sdp,
+        timestamp: new Date().toISOString()
+      }, { merge: true });
+      console.log(`[WebRTC Audit] Respuesta SDP enviada correctamente a: ${targetUserId}`);
+    } catch (e) {
+      console.error('[WebRTC Answer Send Error]', e);
+    }
+  };
+
+  const sendIceCandidate = async (targetUserId: string, candidate: RTCIceCandidate) => {
+    if (!directDb) return;
+    try {
+      const candidateId = `cand_${user.id}_${targetUserId}_${Math.random().toString(36).substring(2, 9)}`;
+      const signalId = `sig_cand_${meetingId}_${candidateId}`;
+      await setDoc(doc(directDb, 'meetingSignals', signalId), {
+        id: signalId,
+        meetingId,
+        senderId: user.id,
+        receiverId: targetUserId,
+        type: 'candidate',
+        candidate: JSON.stringify(candidate.toJSON()),
+        timestamp: new Date().toISOString()
+      });
+    } catch (e) {
+      console.error('[WebRTC Candidate Send Error]', e);
+    }
+  };
+
+  // Setup actual RTCPeerConnection instances loaded with redundant production STUN/TURN traversal servers
+  const createPeerConnection = (targetUserId: string) => {
+    if (peerConnectionsRef.current[targetUserId]) {
+      return peerConnectionsRef.current[targetUserId];
+    }
+
+    console.log(`[WebRTC Setup] Creando RTCPeerConnection para el par: ${targetUserId}`);
+    
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
+        { urls: 'stun:stun.l.google.com:5349' },
+        { urls: 'stun:stun1.l.google.com:5349' },
+        // Enterprise high-availability Coturn configurations as requested
+        { 
+          urls: 'turn:turn.sinergiameet.com:3478?transport=udp',
+          username: 'sinergia_sec_user',
+          credential: 'SinergiaSuperSecureCredential2026'
+        },
+        { 
+          urls: 'turn:turn.sinergiameet.com:3478?transport=tcp',
+          username: 'sinergia_sec_user',
+          credential: 'SinergiaSuperSecureCredential2026'
+        },
+        { 
+          urls: 'turn:turn.sinergiameet.com:5349?transport=udp',
+          username: 'sinergia_sec_user',
+          credential: 'SinergiaSuperSecureCredential2026'
+        },
+        { 
+          urls: 'turn:turn.sinergiameet.com:5349?transport=tcp',
+          username: 'sinergia_sec_user',
+          credential: 'SinergiaSuperSecureCredential2026'
+        }
+      ],
+      iceCandidatePoolSize: 10
+    });
+
+    // Seed local tracks immediately so renegotiations are complete from step zero
+    if (localStream) {
+      localStream.getTracks().forEach(track => {
+        pc.addTrack(track, localStream);
+      });
+      console.log(`[WebRTC Media] Añadidas pistas locales de audio/video a la conexión de: ${targetUserId}`);
+    }
+
+    pc.ontrack = (event) => {
+      console.log(`[WebRTC Media Success] Recibiendo transmisión remota en vivo para el par: ${targetUserId}`);
+      if (event.streams && event.streams[0]) {
+        setRemoteStreams(prev => ({
+          ...prev,
+          [targetUserId]: event.streams[0]
+        }));
+      }
+    };
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        sendIceCandidate(targetUserId, event.candidate);
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log(`[WebRTC State] Cambio en la conexión de ${targetUserId}: ${pc.iceConnectionState}`);
+      if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
+        console.warn(`[WebRTC State] Reconectando de forma automática par: ${targetUserId}`);
+        handlePeerReconnection(targetUserId);
+      }
+    };
+
+    peerConnectionsRef.current[targetUserId] = pc;
+    return pc;
+  };
+
+  // Self-healing automatic reconnect mechanics to solve mobile NAT drops
+  const handlePeerReconnection = async (targetUserId: string) => {
+    try {
+      const pc = peerConnectionsRef.current[targetUserId];
+      if (pc) {
+        pc.close();
+        delete peerConnectionsRef.current[targetUserId];
+      }
+      initiatedPeersRef.current.delete(targetUserId);
+      
+      // Spawn fresh replacement connection
+      const newPc = createPeerConnection(targetUserId);
+      
+      // Respect lexicographical role: if smaller, re-offer
+      if (user.id < targetUserId) {
+        initiatedPeersRef.current.add(targetUserId);
+        const offer = await newPc.createOffer({ iceRestart: true });
+        await newPc.setLocalDescription(offer);
+        await sendOffer(targetUserId, offer);
+      }
+    } catch (e) {
+      console.error('[WebRTC Reconnection Failed]', e);
+    }
+  };
+
+  // 1. Dynamic peer list observer that cleans up zombie connections immediately
+  useEffect(() => {
+    const activeParticipantsSet = new Set(participants.filter(p => !p.isInWaitingRoom).map(p => p.userId));
+    
+    Object.keys(peerConnectionsRef.current).forEach(targetUserId => {
+      if (!activeParticipantsSet.has(targetUserId)) {
+        console.log(`[WebRTC Lifecycle] Desconexión del par. Limpiando recurso: ${targetUserId}`);
+        
+        try {
+          peerConnectionsRef.current[targetUserId].close();
+        } catch (e) { /* ignore */ }
+        
+        delete peerConnectionsRef.current[targetUserId];
+        initiatedPeersRef.current.delete(targetUserId);
+        delete bufferedCandidatesRef.current[targetUserId];
+
+        setRemoteStreams(prev => {
+          const updated = { ...prev };
+          delete updated[targetUserId];
+          return updated;
+        });
+      }
+    });
+  }, [participants]);
+
+  // 1.5 Sync camera updates if muted or video toggle happens during live meeting
+  useEffect(() => {
+    if (!localStream) return;
+    Object.keys(peerConnectionsRef.current).forEach(targetUserId => {
+      const pc = peerConnectionsRef.current[targetUserId];
+      if (pc) {
+        pc.getSenders().forEach(sender => {
+          if (sender.track && sender.track.kind === 'audio') {
+            sender.track.enabled = !isMuted;
+          }
+          if (sender.track && sender.track.kind === 'video') {
+            sender.track.enabled = !isVideoOff;
+          }
+        });
+      }
+    });
+  }, [isMuted, isVideoOff, localStream]);
+
+  // 2. Proactive handshakes logic using lexicographical glare resolving guidelines
+  useEffect(() => {
+    if (!localStream) return;
+
+    const remoteActiveParticipants = participants.filter(p => !p.isInWaitingRoom && p.userId !== user.id);
+
+    remoteActiveParticipants.forEach(async (participant) => {
+      const targetUserId = participant.userId;
+
+      // Rule: Smaller ID initiates connection to avoid glare race conditions
+      if (user.id < targetUserId) {
+        if (!peerConnectionsRef.current[targetUserId]) {
+          console.log(`[WebRTC Handshake Engine] Iniciando canal activo como solicitante hacia: ${participant.name}`);
+          const pc = createPeerConnection(targetUserId);
+
+          if (!initiatedPeersRef.current.has(targetUserId)) {
+            initiatedPeersRef.current.add(targetUserId);
+            try {
+              const offer = await pc.createOffer({
+                offerToReceiveAudio: true,
+                offerToReceiveVideo: true
+              });
+              await pc.setLocalDescription(offer);
+              await sendOffer(targetUserId, offer);
+            } catch (err) {
+              console.error(`[WebRTC Handshake Engine Offer Failed] ${targetUserId}:`, err);
+            }
+          }
+        }
+      } else {
+        // Passive receiver: Pre-crear the connection to ensure candidate listeners and tracks are aligned early
+        if (!peerConnectionsRef.current[targetUserId]) {
+          console.log(`[WebRTC Handshake Engine] Pre-creando receptor pasivo a la espera para: ${participant.name}`);
+          createPeerConnection(targetUserId);
+        }
+      }
+    });
+  }, [participants, localStream]);
+
+  // 3. Signaling listener over Firestore direct live streaming channels
+  useEffect(() => {
+    if (!directDb || !localStream) return;
+
+    console.log('[WebRTC Signaling] Activando canal de escucha de señales Firestore para: ' + user.name);
+
+    const qSignals = query(
+      collection(directDb, 'meetingSignals'),
+      where('meetingId', '==', meetingId),
+      where('receiverId', '==', user.id)
+    );
+
+    const unsubscribe = onSnapshot(qSignals, async (snapshot) => {
+      for (const d of snapshot.docs) {
+        const data = d.data();
+        const senderId = data.senderId;
+
+        if (processedSignalsRef.current.has(data.id)) continue;
+        processedSignalsRef.current.add(data.id);
+
+        try {
+          if (data.type === 'offer') {
+            console.log(`[WebRTC signaling] Recibida oferta SDP de: ${senderId}`);
+            let pc = peerConnectionsRef.current[senderId];
+            if (!pc) {
+              pc = createPeerConnection(senderId);
+            }
+            await pc.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp: data.sdp }));
+
+            // Process any temporarily buffered candidate messages
+            if (bufferedCandidatesRef.current[senderId]) {
+              console.log(`[WebRTC signaling] Aplicando canditatos en buffer (${bufferedCandidatesRef.current[senderId].length}) de: ${senderId}`);
+              for (const cand of bufferedCandidatesRef.current[senderId]) {
+                await pc.addIceCandidate(cand).catch(e => console.warn('[WebRTC candidate error]', e));
+              }
+              delete bufferedCandidatesRef.current[senderId];
+            }
+
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+            await sendAnswer(senderId, answer);
+          } 
+          else if (data.type === 'answer') {
+            console.log(`[WebRTC signaling] Recibida respuesta SDP de: ${senderId}`);
+            const pc = peerConnectionsRef.current[senderId];
+            if (pc) {
+              await pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp: data.sdp }));
+            }
+          } 
+          else if (data.type === 'candidate') {
+            const candidateInfo = JSON.parse(data.candidate);
+            const candidate = new RTCIceCandidate(candidateInfo);
+            const pc = peerConnectionsRef.current[senderId];
+
+            if (pc && pc.remoteDescription) {
+              await pc.addIceCandidate(candidate).catch(e => console.warn('[WebRTC Candidate Sync failed]', e));
+            } else {
+              // Remote description not yet resolved, buffer candidates safely
+              if (!bufferedCandidatesRef.current[senderId]) {
+                bufferedCandidatesRef.current[senderId] = [];
+              }
+              bufferedCandidatesRef.current[senderId].push(candidate);
+            }
+          }
+        } catch (signalErr) {
+          console.error('[WebRTC signaling Dispatch Exception]', signalErr);
+        }
+      }
+    }, (err) => {
+      console.error('[WebRTC Signaling Engine Error]', err);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [localStream, meetingId, user.id]);
+
   // Initialize browser camera/microphone media stream
   useEffect(() => {
     async function startCamera() {
@@ -93,11 +430,18 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
     fetchChats();
 
     return () => {
-      // Clean up Stream
+      // Clean up local tracks
       if (localVideoRef.current && localVideoRef.current.srcObject) {
         const str = localVideoRef.current.srcObject as MediaStream;
         str.getTracks().forEach(track => track.stop());
       }
+      // Clean up all initialized peer connections on room teardown
+      Object.keys(peerConnectionsRef.current).forEach(targetUserId => {
+        try {
+          peerConnectionsRef.current[targetUserId].close();
+        } catch (e) { /* ignore */ }
+      });
+      peerConnectionsRef.current = {};
     };
   }, []);
 
@@ -552,30 +896,44 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
           {/* ACTIVE PARTICIPANTS CALL GRIDS */}
           {participants.filter(p => !p.isInWaitingRoom).map((caller) => {
             const isSpeaker = activeSpeaker === caller.id;
+            const remoteStream = remoteStreams[caller.userId];
+            const hasVideo = remoteStream && remoteStream.getVideoTracks().filter(t => t.enabled).length > 0;
+
             return (
               <div 
                 key={caller.id} 
                 id={`caller-grid-${caller.id}`}
                 className={`video-grid-cell aspect-video ${isSpeaker ? 'speaking-pulse border-blue-500' : ''}`}
               >
-                {caller.isVideoOff ? (
+                {caller.isVideoOff || !hasVideo ? (
                   <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900 relative">
-                    <div className="w-16 h-16 rounded-full bg-indigo-950 text-indigo-200 font-display flex items-center justify-center text-lg font-semibold uppercase">
-                      {caller.name.substring(0, 2)}
-                    </div>
-                    <span className="text-xs text-slate-500 mt-3">{caller.name}</span>
-                  </div>
-                ) : (
-                  <div className="w-full h-full relative">
                     <img 
                       referrerPolicy="no-referrer"
                       src={caller.avatar || (caller.userId === 'user-1' 
-                        ? "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=640&h=480&q=80"
+                        ? "https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=120&h=120&q=80"
                         : caller.userId === 'user-2'
-                          ? "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=640&h=480&q=80"
-                          : `https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=640&h=480&q=80`
+                          ? "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=120&h=120&q=80"
+                          : `https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=120&h=120&q=80`
                       )} 
                       alt={caller.name}
+                      className="w-16 h-16 rounded-full border border-slate-700 shadow-md object-cover"
+                    />
+                    <span className="text-xs text-slate-400 mt-2 font-display">{caller.name} {caller.userId === meetingHostId ? '(Anfitrión)' : ''}</span>
+                    <div className="absolute bottom-2 left-2 bg-slate-950/80 border border-slate-800/80 py-1 px-3 rounded-lg text-[11px] font-mono flex items-center gap-1.5 z-10 text-slate-100">
+                      {caller.isMuted ? <MicOff className="w-3.5 h-3.5 text-red-500" /> : <Mic className="w-3.5 h-3.5 text-emerald-400" />}
+                      {caller.name}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="w-full h-full relative bg-slate-950">
+                    <video 
+                      ref={el => {
+                        if (el && el.srcObject !== remoteStream) {
+                          el.srcObject = remoteStream;
+                        }
+                      }}
+                      autoPlay 
+                      playsInline 
                       className="w-full h-full object-cover"
                     />
 
@@ -585,13 +943,13 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
                       </div>
                     )}
 
-                    <div className="absolute bottom-2 left-2 bg-slate-950/80 border border-slate-800/80 py-1 px-3 rounded-lg text-[11px] font-mono flex items-center gap-1.5 z-10 text-slate-100">
+                    <div className="absolute bottom-2 left-2 bg-slate-950/80 border border-slate-800/80 py-1 px-3 rounded-lg text-[11px] font-mono flex items-center gap-1.5 z-10 text-slate-100 font-semibold shadow">
                       {caller.isMuted ? <MicOff className="w-3.5 h-3.5 text-red-500" /> : <Mic className="w-3.5 h-3.5 text-emerald-400" />}
                       {caller.name}
                     </div>
 
                     {/* HOST ADVANCED ROW PANELS FOR MODERATION */}
-                    <div className="absolute top-2 left-2 flex gap-1 opacity-0 hover:opacity-100 focus-within:opacity-100 transition-opacity bg-slate-950/80 p-1.5 rounded-xl border border-slate-800">
+                    <div className="absolute top-2 left-2 flex gap-1 opacity-100 bg-slate-950/85 p-1.5 rounded-xl border border-slate-800 shadow">
                       <button 
                         id={`btn-mute-caller-${caller.id}`}
                         onClick={() => handleMuteParticipant(caller.id)}
