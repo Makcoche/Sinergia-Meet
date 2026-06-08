@@ -25,9 +25,11 @@ export default function App() {
     const mId = params.get('meeting');
     if (mId) {
       window.history.replaceState({}, document.title, window.location.pathname);
+      sessionStorage.setItem('sinergia_pending_meeting_id', mId);
       return mId;
     }
-    return null;
+    // Fallback to sessionStorage in case of device permission reloads
+    return sessionStorage.getItem('sinergia_pending_meeting_id');
   });
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
@@ -52,6 +54,7 @@ export default function App() {
     if (currentUser && pendingMeetingId) {
       handleJoinMeeting(pendingMeetingId);
       setPendingMeetingId(null);
+      sessionStorage.removeItem('sinergia_pending_meeting_id');
     }
   }, [currentUser, pendingMeetingId]);
 
@@ -135,7 +138,7 @@ export default function App() {
       id: `guest-${Math.random().toString(36).substring(2, 11)}`,
       name: `${authName.trim()} (Invitado)`,
       email: `guest-${Date.now()}@sinergia.temp`,
-      role: 'USER',
+      role: 'GUEST',
       status: 'ACTIVE',
       createdAt: new Date().toISOString(),
       avatar: `https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&h=150&q=80`
@@ -276,7 +279,7 @@ export default function App() {
   };
 
   const menuItems = [
-    { id: 'DASHBOARD', label: 'Inicio', icon: Video, roles: ['USER', 'ADMIN', 'ENTERPRISE'] },
+    { id: 'DASHBOARD', label: 'Inicio', icon: Video, roles: ['USER', 'ADMIN', 'ENTERPRISE', 'GUEST'] },
     { id: 'WALLET', label: 'Sinergia Wallet', icon: Wallet, roles: ['USER', 'ADMIN', 'ENTERPRISE'] },
     { id: 'BILLING', label: 'Planes SaaS', icon: CreditCard, roles: ['USER', 'ADMIN', 'ENTERPRISE'] },
     { id: 'ADMIN', label: 'Consola Admin', icon: ShieldAlert, roles: ['ADMIN'] },
@@ -534,21 +537,23 @@ export default function App() {
             </div>
 
             {/* Wallet Quick indicators and refresh */}
-            <div className="pt-2.5 border-t border-[#2D3748] flex justify-between items-center text-xs">
-              <div className="flex flex-col">
-                <span className="text-[10px] text-slate-400 font-mono">Billetera</span>
-                <span className="font-semibold text-emerald-400 font-mono">${walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</span>
-              </div>
+            {currentUser.role !== 'GUEST' && (
+              <div className="pt-2.5 border-t border-[#2D3748] flex justify-between items-center text-xs">
+                <div className="flex flex-col">
+                  <span className="text-[10px] text-slate-400 font-mono">Billetera</span>
+                  <span className="font-semibold text-emerald-400 font-mono">${walletBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USD</span>
+                </div>
 
-              <button 
-                id="btn-refresh-balance-direct"
-                onClick={fetchWalletBalance} 
-                className="p-1 hover:bg-[#1E293B]/80 text-[#94A3B8] hover:text-white rounded transition-colors cursor-pointer"
-                title="Sincronizar saldo de Sinergia Wallet"
-              >
-                <RefreshCw className="w-3.5 h-3.5" />
-              </button>
-            </div>
+                <button 
+                  id="btn-refresh-balance-direct"
+                  onClick={fetchWalletBalance} 
+                  className="p-1 hover:bg-[#1E293B]/80 text-[#94A3B8] hover:text-white rounded transition-colors cursor-pointer"
+                  title="Sincronizar saldo de Sinergia Wallet"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Nav Items */}

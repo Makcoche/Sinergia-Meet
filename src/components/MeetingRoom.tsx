@@ -70,12 +70,17 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
   // Floating reaction animation state
   const [reactions, setReactions] = useState<{ id: string; emoji: string; left: number }[]>([]);
 
+  // Generate a distinct tab/device session suffix to prevent signaling and presence collision
+  const sessionSuffix = useRef(Math.random().toString(36).substring(2, 6)).current;
+  const ownParticipantId = `${user.id}_${sessionSuffix}`;
+  const partId = `${meetingId}_${ownParticipantId}`;
+
   // ============================================================================
   // DEPLOYED PRODUCTION-GRADE WEBRTC CONFERENCING ENGINE
   // ============================================================================
   const [remoteStreams, setRemoteStreams] = useState<Record<string, MediaStream>>({});
   
-  // Track all individual peer connections by participant user ID
+  // Track all individual peer connections by participant unique ID (partId)
   const peerConnectionsRef = useRef<Record<string, RTCPeerConnection>>({});
   
   // Prevent glare by keeping track of which peers we have already initiated an offer to
@@ -88,54 +93,54 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
   const bufferedCandidatesRef = useRef<Record<string, RTCIceCandidate[]>>({});
 
   // Helper routine to register and dispatch generated signaling payloads over Firestore
-  const sendOffer = async (targetUserId: string, offer: RTCSessionDescriptionInit) => {
+  const sendOffer = async (targetPartId: string, offer: RTCSessionDescriptionInit) => {
     if (!directDb) return;
     try {
-      const signalId = `sig_off_${meetingId}_${user.id}_${targetUserId}`;
+      const signalId = `sig_off_${meetingId}_${ownParticipantId}_${targetPartId}`;
       await setDoc(doc(directDb, 'meetingSignals', signalId), {
         id: signalId,
         meetingId,
-        senderId: user.id,
-        receiverId: targetUserId,
+        senderId: partId,
+        receiverId: targetPartId,
         type: 'offer',
         sdp: offer.sdp,
         timestamp: new Date().toISOString()
       }, { merge: true });
-      console.log(`[WebRTC Audit] Oferta SDP enviada correctamente a: ${targetUserId}`);
+      console.log(`[WebRTC Audit] Oferta SDP enviada correctamente a: ${targetPartId}`);
     } catch (e) {
       console.error('[WebRTC Offer Send Error]', e);
     }
   };
 
-  const sendAnswer = async (targetUserId: string, answer: RTCSessionDescriptionInit) => {
+  const sendAnswer = async (targetPartId: string, answer: RTCSessionDescriptionInit) => {
     if (!directDb) return;
     try {
-      const signalId = `sig_ans_${meetingId}_${user.id}_${targetUserId}`;
+      const signalId = `sig_ans_${meetingId}_${ownParticipantId}_${targetPartId}`;
       await setDoc(doc(directDb, 'meetingSignals', signalId), {
         id: signalId,
         meetingId,
-        senderId: user.id,
-        receiverId: targetUserId,
+        senderId: partId,
+        receiverId: targetPartId,
         type: 'answer',
         sdp: answer.sdp,
         timestamp: new Date().toISOString()
       }, { merge: true });
-      console.log(`[WebRTC Audit] Respuesta SDP enviada correctamente a: ${targetUserId}`);
+      console.log(`[WebRTC Audit] Respuesta SDP enviada correctamente a: ${targetPartId}`);
     } catch (e) {
       console.error('[WebRTC Answer Send Error]', e);
     }
   };
 
-  const sendIceCandidate = async (targetUserId: string, candidate: RTCIceCandidate) => {
+  const sendIceCandidate = async (targetPartId: string, candidate: RTCIceCandidate) => {
     if (!directDb) return;
     try {
-      const candidateId = `cand_${user.id}_${targetUserId}_${Math.random().toString(36).substring(2, 9)}`;
+      const candidateId = `cand_${ownParticipantId}_${targetPartId}_${Math.random().toString(36).substring(2, 9)}`;
       const signalId = `sig_cand_${meetingId}_${candidateId}`;
       await setDoc(doc(directDb, 'meetingSignals', signalId), {
         id: signalId,
         meetingId,
-        senderId: user.id,
-        receiverId: targetUserId,
+        senderId: partId,
+        receiverId: targetPartId,
         type: 'candidate',
         candidate: JSON.stringify(candidate.toJSON()),
         timestamp: new Date().toISOString()
@@ -146,12 +151,12 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
   };
 
   // Setup actual RTCPeerConnection instances loaded with redundant production STUN/TURN traversal servers
-  const createPeerConnection = (targetUserId: string) => {
-    if (peerConnectionsRef.current[targetUserId]) {
-      return peerConnectionsRef.current[targetUserId];
+  const createPeerConnection = (targetPartId: string) => {
+    if (peerConnectionsRef.current[targetPartId]) {
+      return peerConnectionsRef.current[targetPartId];
     }
 
-    console.log(`[WebRTC Setup] Creando RTCPeerConnection para el par: ${targetUserId}`);
+    console.log(`[WebRTC Setup] Creando RTCPeerConnection para el par: ${targetPartId}`);
     
     const pc = new RTCPeerConnection({
       iceServers: [
@@ -192,56 +197,56 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
       localStream.getTracks().forEach(track => {
         pc.addTrack(track, localStream);
       });
-      console.log(`[WebRTC Media] Añadidas pistas locales de audio/video a la conexión de: ${targetUserId}`);
+      console.log(`[WebRTC Media] Añadidas pistas locales de audio/video a la conexión de: ${targetPartId}`);
     }
 
     pc.ontrack = (event) => {
-      console.log(`[WebRTC Media Success] Recibiendo transmisión remota en vivo para el par: ${targetUserId}`);
+      console.log(`[WebRTC Media Success] Recibiendo transmisión remota en vivo para el par: ${targetPartId}`);
       if (event.streams && event.streams[0]) {
         setRemoteStreams(prev => ({
           ...prev,
-          [targetUserId]: event.streams[0]
+          [targetPartId]: event.streams[0]
         }));
       }
     };
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
-        sendIceCandidate(targetUserId, event.candidate);
+        sendIceCandidate(targetPartId, event.candidate);
       }
     };
 
     pc.oniceconnectionstatechange = () => {
-      console.log(`[WebRTC State] Cambio en la conexión de ${targetUserId}: ${pc.iceConnectionState}`);
+      console.log(`[WebRTC State] Cambio en la conexión de ${targetPartId}: ${pc.iceConnectionState}`);
       if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'disconnected') {
-        console.warn(`[WebRTC State] Reconectando de forma automática par: ${targetUserId}`);
-        handlePeerReconnection(targetUserId);
+        console.warn(`[WebRTC State] Reconectando de forma automática par: ${targetPartId}`);
+        handlePeerReconnection(targetPartId);
       }
     };
 
-    peerConnectionsRef.current[targetUserId] = pc;
+    peerConnectionsRef.current[targetPartId] = pc;
     return pc;
   };
 
   // Self-healing automatic reconnect mechanics to solve mobile NAT drops
-  const handlePeerReconnection = async (targetUserId: string) => {
+  const handlePeerReconnection = async (targetPartId: string) => {
     try {
-      const pc = peerConnectionsRef.current[targetUserId];
+      const pc = peerConnectionsRef.current[targetPartId];
       if (pc) {
         pc.close();
-        delete peerConnectionsRef.current[targetUserId];
+        delete peerConnectionsRef.current[targetPartId];
       }
-      initiatedPeersRef.current.delete(targetUserId);
+      initiatedPeersRef.current.delete(targetPartId);
       
       // Spawn fresh replacement connection
-      const newPc = createPeerConnection(targetUserId);
+      const newPc = createPeerConnection(targetPartId);
       
       // Respect lexicographical role: if smaller, re-offer
-      if (user.id < targetUserId) {
-        initiatedPeersRef.current.add(targetUserId);
+      if (partId < targetPartId) {
+        initiatedPeersRef.current.add(targetPartId);
         const offer = await newPc.createOffer({ iceRestart: true });
         await newPc.setLocalDescription(offer);
-        await sendOffer(targetUserId, offer);
+        await sendOffer(targetPartId, offer);
       }
     } catch (e) {
       console.error('[WebRTC Reconnection Failed]', e);
@@ -250,23 +255,23 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
 
   // 1. Dynamic peer list observer that cleans up zombie connections immediately
   useEffect(() => {
-    const activeParticipantsSet = new Set(participants.filter(p => !p.isInWaitingRoom).map(p => p.userId));
+    const activeParticipantsSet = new Set(participants.filter(p => !p.isInWaitingRoom).map(p => p.id));
     
-    Object.keys(peerConnectionsRef.current).forEach(targetUserId => {
-      if (!activeParticipantsSet.has(targetUserId)) {
-        console.log(`[WebRTC Lifecycle] Desconexión del par. Limpiando recurso: ${targetUserId}`);
+    Object.keys(peerConnectionsRef.current).forEach(targetPartId => {
+      if (!activeParticipantsSet.has(targetPartId)) {
+        console.log(`[WebRTC Lifecycle] Desconexión del par. Limpiando recurso: ${targetPartId}`);
         
         try {
-          peerConnectionsRef.current[targetUserId].close();
+          peerConnectionsRef.current[targetPartId].close();
         } catch (e) { /* ignore */ }
         
-        delete peerConnectionsRef.current[targetUserId];
-        initiatedPeersRef.current.delete(targetUserId);
-        delete bufferedCandidatesRef.current[targetUserId];
+        delete peerConnectionsRef.current[targetPartId];
+        initiatedPeersRef.current.delete(targetPartId);
+        delete bufferedCandidatesRef.current[targetPartId];
 
         setRemoteStreams(prev => {
           const updated = { ...prev };
-          delete updated[targetUserId];
+          delete updated[targetPartId];
           return updated;
         });
       }
@@ -276,8 +281,8 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
   // 1.5 Sync camera updates if muted or video toggle happens during live meeting
   useEffect(() => {
     if (!localStream) return;
-    Object.keys(peerConnectionsRef.current).forEach(targetUserId => {
-      const pc = peerConnectionsRef.current[targetUserId];
+    Object.keys(peerConnectionsRef.current).forEach(targetPartId => {
+      const pc = peerConnectionsRef.current[targetPartId];
       if (pc) {
         pc.getSenders().forEach(sender => {
           if (sender.track && sender.track.kind === 'audio') {
@@ -295,36 +300,36 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
   useEffect(() => {
     if (!localStream) return;
 
-    const remoteActiveParticipants = participants.filter(p => !p.isInWaitingRoom && p.userId !== user.id);
+    const remoteActiveParticipants = participants.filter(p => !p.isInWaitingRoom);
 
     remoteActiveParticipants.forEach(async (participant) => {
-      const targetUserId = participant.userId;
+      const targetPartId = participant.id;
 
       // Rule: Smaller ID initiates connection to avoid glare race conditions
-      if (user.id < targetUserId) {
-        if (!peerConnectionsRef.current[targetUserId]) {
+      if (partId < targetPartId) {
+        if (!peerConnectionsRef.current[targetPartId]) {
           console.log(`[WebRTC Handshake Engine] Iniciando canal activo como solicitante hacia: ${participant.name}`);
-          const pc = createPeerConnection(targetUserId);
+          const pc = createPeerConnection(targetPartId);
 
-          if (!initiatedPeersRef.current.has(targetUserId)) {
-            initiatedPeersRef.current.add(targetUserId);
+          if (!initiatedPeersRef.current.has(targetPartId)) {
+            initiatedPeersRef.current.add(targetPartId);
             try {
               const offer = await pc.createOffer({
                 offerToReceiveAudio: true,
                 offerToReceiveVideo: true
               });
               await pc.setLocalDescription(offer);
-              await sendOffer(targetUserId, offer);
+              await sendOffer(targetPartId, offer);
             } catch (err) {
-              console.error(`[WebRTC Handshake Engine Offer Failed] ${targetUserId}:`, err);
+              console.error(`[WebRTC Handshake Engine Offer Failed] ${targetPartId}:`, err);
             }
           }
         }
       } else {
         // Passive receiver: Pre-crear the connection to ensure candidate listeners and tracks are aligned early
-        if (!peerConnectionsRef.current[targetUserId]) {
+        if (!peerConnectionsRef.current[targetPartId]) {
           console.log(`[WebRTC Handshake Engine] Pre-creando receptor pasivo a la espera para: ${participant.name}`);
-          createPeerConnection(targetUserId);
+          createPeerConnection(targetPartId);
         }
       }
     });
@@ -339,7 +344,7 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
     const qSignals = query(
       collection(directDb, 'meetingSignals'),
       where('meetingId', '==', meetingId),
-      where('receiverId', '==', user.id)
+      where('receiverId', '==', partId)
     );
 
     const unsubscribe = onSnapshot(qSignals, async (snapshot) => {
@@ -405,7 +410,7 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
     return () => {
       unsubscribe();
     };
-  }, [localStream, meetingId, user.id]);
+  }, [localStream, meetingId, partId]);
 
   // Initialize browser camera/microphone media stream
   useEffect(() => {
@@ -449,7 +454,6 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
   const updateOurPresence = async (muted: boolean, videoOff: boolean, hand: boolean, waiting: boolean = amIInWaitingRoom, customHostId: string = meetingHostId) => {
     if (!directDb) return;
     try {
-      const partId = `${meetingId}_${user.id}`;
       const isUserHost = user.id === customHostId || (!customHostId && user.role === 'ADMIN');
       await setDoc(doc(directDb, 'meetingParticipants', partId), {
         id: partId,
@@ -473,7 +477,7 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
   // Sync our media controls and metadata state whenever it changes
   useEffect(() => {
     updateOurPresence(isMuted, isVideoOff, handRaised, amIInWaitingRoom);
-  }, [isMuted, isVideoOff, handRaised, meetingId, user.id, meetingHostId, amIInWaitingRoom]);
+  }, [isMuted, isVideoOff, handRaised, meetingId, partId, meetingHostId, amIInWaitingRoom]);
 
   // Periodic heartbeat to prevent timeout on other clients' grids
   useEffect(() => {
@@ -482,13 +486,12 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
     }, 5000);
 
     return () => clearInterval(presenceHeartbeat);
-  }, [isMuted, isVideoOff, handRaised, meetingId, user.id, meetingHostId, amIInWaitingRoom]);
+  }, [isMuted, isVideoOff, handRaised, meetingId, partId, meetingHostId, amIInWaitingRoom]);
 
   // Remove our presence record on unmount / window unload
   useEffect(() => {
     const removePresence = async () => {
       if (directDb) {
-        const partId = `${meetingId}_${user.id}`;
         try {
           await deleteDoc(doc(directDb, 'meetingParticipants', partId));
         } catch (e) {
@@ -502,7 +505,7 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
       window.removeEventListener('beforeunload', removePresence);
       removePresence();
     };
-  }, [meetingId, user.id]);
+  }, [meetingId, partId]);
 
   // Listen to other users' presence from Firestore in real-time
   useEffect(() => {
@@ -518,12 +521,18 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
       const now = Date.now();
       snapshot.forEach((snapDoc) => {
         const data = snapDoc.data() as any;
+
         // Don't include ourselves in the remote stream list (as we are rendered specially)
-        if (data.userId !== user.id) {
+        if (data.id !== partId) {
           // Prevent ghost/zombie participants by verifying the heartbeat is active (within last 120 seconds to be clock-skew robust)
           const updatedAtTime = data.updatedAt ? new Date(data.updatedAt).getTime() : 0;
           if (now - updatedAtTime < 120000) {
-            list.push(data as Participant);
+            // Suffix name if same user account to prevent UI confusion
+            const suffix = data.userId === user.id ? ' (Otro Dispositivo)' : '';
+            list.push({
+              ...data,
+              name: data.name + suffix
+            } as Participant);
           }
         }
       });
@@ -533,12 +542,11 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
     });
 
     return () => unsubscribe();
-  }, [meetingId, user.id]);
+  }, [meetingId, user.id, partId]);
 
   // Host Remote Regulation Listener (Kicked / Silenced / Admitted by Host)
   useEffect(() => {
     if (!directDb) return;
-    const partId = `${meetingId}_${user.id}`;
     
     const unsubscribe = onSnapshot(doc(directDb, 'meetingParticipants', partId), (snapshot) => {
       if (snapshot.exists()) {
@@ -561,7 +569,7 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
     });
 
     return () => unsubscribe();
-  }, [meetingId, user.id, isMuted, localStream]);
+  }, [meetingId, partId, isMuted, localStream]);
 
   // Periodic simulated transcriptions and active speaker switching to represent live conversation state
   useEffect(() => {

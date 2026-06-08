@@ -10,7 +10,7 @@ export interface User {
   email: string;
   avatar?: string;
   companyLogo?: string;
-  role: 'USER' | 'ADMIN' | 'ENTERPRISE';
+  role: 'USER' | 'ADMIN' | 'ENTERPRISE' | 'GUEST';
   status: 'ACTIVE' | 'PENDING' | 'SUSPENDED';
   teamId?: string;
   createdAt: string;
