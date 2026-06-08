@@ -145,6 +145,7 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
         candidate: JSON.stringify(candidate.toJSON()),
         timestamp: new Date().toISOString()
       });
+      console.log(`[WebRTC Audit] Candidato ICE enviado de forma asíncrona hacia el par: ${targetPartId}`);
     } catch (e) {
       console.error('[WebRTC Candidate Send Error]', e);
     }
@@ -552,13 +553,26 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
       if (snapshot.exists()) {
         const data = snapshot.data();
         if (data.kicked) {
+          console.log(`[WebRTC Audit] EXPULSIÓN: El administrador nos ha expulsado de la reunión.`);
           alert('Has sido expulsado de la reunión por el anfitrión.');
           onExit();
         } else if (data.isMuted && !isMuted) {
+          console.log(`[WebRTC Audit / Remote Command] SILENCIADO: El administrador ha silenciado nuestro micrófono.`);
           setIsMuted(true);
           // Update actual stream track state
           if (localStream) {
             localStream.getAudioTracks().forEach(track => track.enabled = false);
+          }
+        }
+        
+        // Handle remote video shutdown command from Admin
+        if (data.isVideoOff && !isVideoOff) {
+          console.log(`[WebRTC Audit / Remote Command] CAMARA APAGADA: El administrador ha desactivado nuestra cámara.`);
+          setIsVideoOff(true);
+          if (localStream) {
+            localStream.getVideoTracks().forEach(track => {
+              track.enabled = false;
+            });
           }
         }
         
@@ -722,6 +736,19 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
     setDbParticipants(prev => prev.map(p => p.id === id ? { ...p, isMuted: true } : p));
   };
 
+  // Host Action: Disable Camera / Stop Video of Participant Remotely
+  const handleDisableVideoParticipant = async (id: string) => {
+    if (directDb) {
+      try {
+        await setDoc(doc(directDb, 'meetingParticipants', id), { isVideoOff: true }, { merge: true });
+        console.log(`[WebRTC Audit / Admin] Apagar cámara remota enviado para el id: ${id}`);
+      } catch (e) {
+        console.warn('Fallo apagar cámara remota en Firestore:', e);
+      }
+    }
+    setDbParticipants(prev => prev.map(p => p.id === id ? { ...p, isVideoOff: true } : p));
+  };
+
   // Host Action: Accept Participant in Waiting Room
   const handleAcceptParticipant = async (id: string) => {
     if (directDb) {
@@ -807,7 +834,7 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
   }
 
   return (
-    <div className="h-[90vh] flex flex-col lg:flex-row gap-4 relative" id="live-meeting-room">
+    <div className="h-auto lg:h-[90vh] flex flex-col lg:flex-row gap-4 relative" id="live-meeting-room">
       
       {/* Dynamic Floating Reactions Canvas */}
       <div className="absolute inset-0 pointer-events-none z-30 overflow-hidden">
@@ -823,7 +850,7 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
       </div>
 
       {/* Main Conference Screen Container */}
-      <div className="flex-1 flex flex-col justify-between p-4 rounded-3xl bg-[#0B1322] border border-slate-800 overflow-hidden relative">
+      <div className="w-full lg:flex-1 flex flex-col justify-between p-4 rounded-3xl bg-[#0B1322] border border-slate-800 overflow-hidden relative min-h-[460px] lg:min-h-0">
         
         {/* Upper Dashboard Strip with Settings & Title */}
         <div className="z-10 flex justify-between items-center bg-slate-900/90 border border-slate-800 py-3 px-5 rounded-2xl">
@@ -835,27 +862,76 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
           </div>
           
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-mono text-slate-300 bg-slate-800 border border-slate-700 py-1 px-3 rounded-lg hidden sm:inline-block">
-              ID: <strong>{meetingId.substring(0, 8)}...</strong>
+            <span className="text-[9px] sm:text-[10px] font-mono text-slate-300 bg-slate-800 border border-slate-700 py-1 px-2.5 rounded-lg">
+              ID: <strong className="text-white">{meetingId.substring(0, 8)}</strong>
             </span>
             <button
               id="btn-copy-live-link"
               onClick={() => {
                 const inviteUrl = `${window.location.origin}?meeting=${meetingId}`;
-                navigator.clipboard.writeText(inviteUrl);
-                setCopySuccess(true);
-                setTimeout(() => setCopySuccess(false), 3000);
+                try {
+                  if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(inviteUrl);
+                  } else {
+                    const textArea = document.createElement("textarea");
+                    textArea.value = inviteUrl;
+                    textArea.style.position = "fixed";
+                    document.body.appendChild(textArea);
+                    textArea.focus();
+                    textArea.select();
+                    document.execCommand("copy");
+                    document.body.removeChild(textArea);
+                  }
+                  setCopySuccess(true);
+                  setTimeout(() => setCopySuccess(false), 3000);
+                } catch (err) {
+                  console.error('Copy fallback failed', err);
+                }
               }}
-              className={`py-1.5 px-3 rounded-lg border text-[10px] font-semibold transition-all flex items-center gap-1.5 cursor-pointer uppercase ${
+              className={`py-1.5 px-2.5 rounded-lg border text-[10px] font-semibold transition-all flex items-center gap-1.5 cursor-pointer uppercase ${
                 copySuccess
                   ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
                   : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
               }`}
             >
               <Link className="w-3 h-3 text-current" />
-              {copySuccess ? 'Copiado' : 'Compartir sala'}
+              {copySuccess ? 'Copiado' : 'Copiar'}
             </button>
           </div>
+        </div>
+
+        {/* Robust Visual Invitation URL Banner for the Current Active Session */}
+        <div className="z-10 mt-2 bg-slate-950/80 border border-slate-800/80 px-4 py-2.5 rounded-xl flex items-center justify-between gap-3 text-[10px] font-mono text-slate-450 z-10">
+          <div className="flex items-center gap-2 truncate text-slate-300">
+            <span className="text-blue-400 font-bold uppercase text-[9px] tracking-wider px-1.5 py-0.5 bg-blue-500/10 rounded-md shrink-0 border border-blue-500/20">Enlace:</span>
+            <span className="truncate select-all text-[10px] text-slate-200 cursor-text" title="Seleccionar enlace">{`${window.location.origin}?meeting=${meetingId}`}</span>
+          </div>
+          <button
+            onClick={() => {
+              const inviteUrl = `${window.location.origin}?meeting=${meetingId}`;
+              try {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                  navigator.clipboard.writeText(inviteUrl);
+                } else {
+                  const textArea = document.createElement("textarea");
+                  textArea.value = inviteUrl;
+                  textArea.style.position = "fixed";
+                  document.body.appendChild(textArea);
+                  textArea.focus();
+                  textArea.select();
+                  document.execCommand("copy");
+                  document.body.removeChild(textArea);
+                }
+                setCopySuccess(true);
+                setTimeout(() => setCopySuccess(false), 3000);
+              } catch (err) {
+                console.error(err);
+              }
+            }}
+            className="shrink-0 text-blue-400 hover:text-blue-300 text-[10px] font-bold uppercase underline cursor-pointer border border-transparent hover:border-current px-1 rounded"
+          >
+            {copySuccess ? 'Copiado' : 'Copiar'}
+          </button>
         </div>
 
         {/* Video Grid layout */}
@@ -904,7 +980,7 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
           {/* ACTIVE PARTICIPANTS CALL GRIDS */}
           {participants.filter(p => !p.isInWaitingRoom).map((caller) => {
             const isSpeaker = activeSpeaker === caller.id;
-            const remoteStream = remoteStreams[caller.userId];
+            const remoteStream = remoteStreams[caller.id];
             const hasVideo = remoteStream && remoteStream.getVideoTracks().filter(t => t.enabled).length > 0;
 
             return (
@@ -1082,6 +1158,122 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
             </div>
           </div>
         )}
+
+        {/* MODERATOR AND ACTIVE PARTICIPANTS CONTROL PANEL */}
+        <div className="p-5 rounded-2xl bg-white border border-slate-200 space-y-4 shadow-sm text-slate-800" id="admin-moderation-participants-panel">
+          <div className="flex justify-between items-center pb-2 border-b border-secondary/15">
+            <h4 className="text-xs font-bold font-mono text-slate-700 flex items-center gap-1.5 uppercase">
+              <Users className="w-4 h-4 text-slate-500" /> Participantes Activos ({participants.length + 1})
+            </h4>
+            {isHost ? (
+              <span className="text-[9px] font-mono text-emerald-600 bg-emerald-50 py-0.5 px-2 rounded-full font-bold border border-emerald-100">
+                ADMINISTRADOR (TÚ)
+              </span>
+            ) : (
+              <span className="text-[9px] font-mono text-blue-600 bg-blue-50 py-0.5 px-2 rounded-full font-bold border border-blue-100">
+                IN VITADO / PARTICIPANTE
+              </span>
+            )}
+          </div>
+
+          <div className="space-y-3 max-h-56 overflow-y-auto pr-1">
+            {/* Local Client (You) */}
+            <div className="flex justify-between items-center p-2 rounded-xl bg-slate-50 border border-slate-100">
+              <div className="flex items-center gap-2 truncate">
+                <img 
+                  referrerPolicy="no-referrer"
+                  src={user.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&h=100&q=80'} 
+                  alt={user.name} 
+                  className="w-7 h-7 rounded-full object-cover border border-slate-200"
+                />
+                <div className="truncate">
+                  <p className="text-xs font-bold text-slate-800 truncate">Tú ({user.name})</p>
+                  <span className="text-[9px] text-[#3B82F6] font-mono uppercase font-semibold">{isHost ? 'Host' : 'Participante'}</span>
+                </div>
+              </div>
+              <div className="flex gap-1">
+                <span className={`p-1 rounded ${isMuted ? 'bg-red-50 text-red-500 border border-red-100' : 'bg-emerald-50 text-emerald-600 border border-emerald-110'}`} title={isMuted ? "Micrófono Silenciado" : "Micrófono Encendido"}>
+                  {isMuted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+                </span>
+                <span className={`p-1 rounded ${isVideoOff ? 'bg-red-50 text-red-500 border border-red-100' : 'bg-blue-50 text-blue-600 border border-blue-110'}`} title={isVideoOff ? "Cámara Apagada" : "Cámara Encendida"}>
+                  {isVideoOff ? <VideoOff className="w-3.5 h-3.5" /> : <VideoIcon className="w-3.5 h-3.5" />}
+                </span>
+              </div>
+            </div>
+
+            {/* Remote active callers */}
+            {participants.map((guest) => (
+              <div key={guest.id} className="flex justify-between items-center p-2 rounded-xl bg-white border border-slate-100 hover:bg-slate-50/50 transition-colors">
+                <div className="flex items-center gap-2 truncate">
+                  <img 
+                    referrerPolicy="no-referrer"
+                    src={guest.avatar || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=100&h=100&q=80'} 
+                    alt={guest.name} 
+                    className="w-7 h-7 rounded-full object-cover border border-slate-200"
+                  />
+                  <div className="truncate">
+                    <p className="text-xs font-bold text-slate-800 truncate">{guest.name}</p>
+                    <span className="text-[9px] text-slate-400 font-mono uppercase font-medium">
+                      {guest.isInWaitingRoom ? 'En Sala Espera' : (guest.role === 'HOST' ? 'Host' : 'Participante')}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1 shrink-0">
+                  {/* Status icons for active devices */}
+                  {!guest.isInWaitingRoom && (
+                    <>
+                      <span className={`p-1 rounded ${guest.isMuted ? 'bg-red-50 text-red-500 border border-red-100' : 'bg-emerald-50 text-emerald-600 border border-emerald-100'}`} title={guest.isMuted ? "Silenciado" : "Micrófono Activo"}>
+                        {guest.isMuted ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
+                      </span>
+                      <span className={`p-1 rounded ${guest.isVideoOff ? 'bg-red-50 text-red-500 border border-red-100' : 'bg-blue-50 text-blue-600 border border-blue-100'}`} title={guest.isVideoOff ? "Cámara Desactivada" : "Cámara Activa"}>
+                        {guest.isVideoOff ? <VideoOff className="w-3.5 h-3.5" /> : <VideoIcon className="w-3.5 h-3.5" />}
+                      </span>
+                    </>
+                  )}
+
+                  {/* Administrative remote commands only if local isHost */}
+                  {isHost && !guest.isInWaitingRoom && (
+                    <div className="flex gap-0.5 border-l border-slate-100 pl-1.5 ml-1">
+                      <button
+                        onClick={() => handleMuteParticipant(guest.id)}
+                        disabled={guest.isMuted}
+                        title="Silenciar Micrófono"
+                        className="p-1 text-red-500 hover:bg-slate-100 disabled:opacity-40 rounded cursor-pointer transition-colors"
+                      >
+                        <MicOff className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => handleDisableVideoParticipant(guest.id)}
+                        disabled={guest.isVideoOff}
+                        title="Apagar Cámara"
+                        className="p-1 text-slate-400 hover:text-red-500 hover:bg-slate-100 disabled:opacity-40 rounded cursor-pointer transition-colors"
+                      >
+                        <VideoOff className="w-3 h-3" />
+                      </button>
+                      <button
+                        onClick={() => handleKickParticipant(guest.id, guest.name)}
+                        title="Expulsar de Sala"
+                        className="p-1 text-rose-600 hover:bg-rose-50 rounded cursor-pointer transition-colors"
+                      >
+                        <PhoneOff className="w-3 h-3" />
+                      </button>
+                    </div>
+                  )}
+
+                  {isHost && guest.isInWaitingRoom && (
+                    <button
+                      onClick={() => handleAcceptParticipant(guest.id)}
+                      className="py-1 px-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold font-mono text-[9px] rounded-lg cursor-pointer shadow-sm transition-all uppercase tracking-wider"
+                    >
+                      Admitir
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
 
         {/* AI GEN COMPANION (Upper widget box) */}
         <div className="p-5 rounded-2xl bg-white border border-slate-200 space-y-4 shadow-sm">

@@ -58,9 +58,25 @@ export default function Dashboard({ user, onJoinMeeting, onNavigateToWallet, onN
 
   const handleCopyLink = (meetingId: string) => {
     const inviteUrl = `${window.location.origin}?meeting=${meetingId}`;
-    navigator.clipboard.writeText(inviteUrl);
-    setCopiedId(meetingId);
-    setTimeout(() => setCopiedId(null), 3000);
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(inviteUrl);
+      } else {
+        const textArea = document.createElement("textarea");
+        textArea.value = inviteUrl;
+        textArea.style.position = "fixed";
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand("copy");
+        document.body.removeChild(textArea);
+      }
+      setCopiedId(meetingId);
+      setTimeout(() => setCopiedId(null), 3000);
+    } catch (e) {
+      console.error('No se pudo copiar el enlace automáticamente', e);
+      alert(`Enlace de sala: ${inviteUrl}`);
+    }
   };
 
   // Fetch initial meetings and teams
@@ -341,6 +357,12 @@ export default function Dashboard({ user, onJoinMeeting, onNavigateToWallet, onN
                         {meet.password && (
                           <span className="text-indigo-600 font-mono text-[10px] font-semibold bg-indigo-50 border border-indigo-100 px-1.5 rounded">[Contraseña requerida]</span>
                         )}
+                      </div>
+
+                      {/* Visual Invitation Link */}
+                      <div className="mt-2.5 flex items-center gap-1.5 bg-slate-50 border border-slate-100 rounded-lg p-2 text-[10px] text-slate-500 font-mono w-full max-w-[280px] sm:max-w-sm md:max-w-md select-all hover:bg-slate-100/50 transition-all cursor-text" title="Doble clic para seleccionar todo el enlace">
+                        <span className="shrink-0 text-[#3B82F6] font-bold">Enlace:</span>
+                        <span className="truncate">{`${window.location.origin}?meeting=${meet.id}`}</span>
                       </div>
                     </div>
 
