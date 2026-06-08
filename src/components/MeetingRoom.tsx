@@ -305,9 +305,12 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
           console.log(`[WebRTC Audit / ontrack] 🔊 Pista restaurada (unmutes) para: ${targetPartId} (${incomingTrack.kind})`);
         };
 
+        // Create a completely new MediaStream reference with all collected tracks to bypass browser caching limitations
+        const freshStream = new MediaStream(streamToUse.getTracks());
+
         return {
           ...prev,
-          [targetPartId]: streamToUse
+          [targetPartId]: freshStream
         };
       });
     };
@@ -1135,7 +1138,15 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
             ) : (
               <div className="w-full h-full relative">
                 <video 
-                  ref={localVideoRef} 
+                  ref={el => {
+                    if (el) {
+                      localVideoRef.current = el;
+                      if (el.srcObject !== localStream) {
+                        el.srcObject = localStream;
+                      }
+                      el.play().catch(e => console.warn('[Local Play blocked]', e));
+                    }
+                  }}
                   autoPlay 
                   playsInline 
                   muted 
@@ -1143,8 +1154,8 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
                 />
                 
                 {/* Fallback avatar if browser has camera disabled/rejected */}
-                {(!localStream || cameraError) && (
-                  <div className="absolute inset-0 bg-gradient-to-tr from-blue-700/20 to-slate-900 flex flex-col items-center justify-center">
+                {!localStream && (
+                  <div className="absolute inset-0 bg-gradient-to-tr from-blue-700/20 to-slate-900 flex flex-col items-center justify-center animate-fade-in">
                     <img 
                       referrerPolicy="no-referrer"
                       src={user.avatar || "https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=180&h=180&q=80"} 
@@ -1167,7 +1178,7 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
           {participants.filter(p => !p.isInWaitingRoom).map((caller) => {
             const isSpeaker = activeSpeaker === caller.id;
             const remoteStream = remoteStreams[caller.id];
-            const hasVideo = remoteStream && remoteStream.getVideoTracks().filter(t => t.enabled).length > 0;
+            const hasVideo = remoteStream && remoteStream.getVideoTracks().length > 0;
 
             return (
               <div 
@@ -1176,7 +1187,7 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
                 className={`video-grid-cell aspect-video ${isSpeaker ? 'speaking-pulse border-blue-500' : ''}`}
               >
                 {caller.isVideoOff || !hasVideo ? (
-                  <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900 relative">
+                  <div className="w-full h-full flex flex-col items-center justify-center bg-slate-900 relative animate-fade-in font-sans">
                     <img 
                       referrerPolicy="no-referrer"
                       src={caller.avatar || (caller.userId === 'user-1' 
@@ -1189,22 +1200,41 @@ export default function MeetingRoom({ meetingId, user, onExit }: MeetingRoomProp
                       className="w-16 h-16 rounded-full border border-slate-700 shadow-md object-cover"
                     />
                     <span className="text-xs text-slate-400 mt-2 font-display">{caller.name} {caller.userId === meetingHostId ? '(Anfitrión)' : ''}</span>
-                    <div className="absolute bottom-2 left-2 bg-slate-950/80 border border-slate-800/80 py-1 px-3 rounded-lg text-[11px] font-mono flex items-center gap-1.5 z-10 text-slate-100">
+                    <div className="absolute bottom-2 left-2 bg-slate-950/80 border border-slate-800/80 py-1 px-3 rounded-lg text-[11px] font-mono flex items-center gap-1.5 z-10 text-slate-100 font-semibold shadow">
                       {caller.isMuted ? <MicOff className="w-3.5 h-3.5 text-red-500" /> : <Mic className="w-3.5 h-3.5 text-emerald-400" />}
                       {caller.name}
                     </div>
                   </div>
                 ) : (
-                  <div className="w-full h-full relative bg-slate-950">
+                  <div className="w-full h-full relative bg-slate-950 animate-fade-in font-sans">
+                    {/* Separate muted video tag bypasses autoplay block on Safari & Chrome on Mobile devices */}
                     <video 
                       ref={el => {
-                        if (el && el.srcObject !== remoteStream) {
-                          el.srcObject = remoteStream;
+                        if (el) {
+                          if (el.srcObject !== remoteStream) {
+                            el.srcObject = remoteStream;
+                          }
+                          el.play().catch(e => console.warn('[WebRTC Video Autoplay Blocked]', e));
                         }
                       }}
                       autoPlay 
                       playsInline 
+                      muted
                       className="w-full h-full object-cover"
+                    />
+
+                    {/* Highly-available separate invisible audio element for clear remote voice stream */}
+                    <audio 
+                      ref={el => {
+                        if (el) {
+                          if (el.srcObject !== remoteStream) {
+                            el.srcObject = remoteStream;
+                          }
+                          el.play().catch(e => console.warn('[WebRTC Audio Autoplay Blocked]', e));
+                        }
+                      }}
+                      autoPlay 
+                      className="hidden"
                     />
 
                     {isSpeaker && (
