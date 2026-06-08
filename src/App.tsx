@@ -6,7 +6,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Video, Wallet, CreditCard, ShieldAlert, BookOpen, 
-  UserCheck, LogIn, RefreshCw, Menu, X, ArrowUpRight, Lock, LogOut
+  UserCheck, LogIn, RefreshCw, Menu, X, ArrowUpRight, Lock, LogOut, Edit3
 } from 'lucide-react';
 
 import Dashboard from './components/Dashboard';
@@ -59,9 +59,14 @@ export default function App() {
   });
 
   const [walletBalance, setWalletBalance] = useState<number>(0.00);
-  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'MEETING' | 'WALLET' | 'BILLING' | 'ADMIN' | 'GUIDE'>('DASHBOARD');
-  const [activeMeetingId, setActiveMeetingId] = useState<string | null>(null);
+  const [activeMeetingId, setActiveMeetingId] = useState<string | null>(() => {
+    return sessionStorage.getItem('sinergia_active_meeting_id') || null;
+  });
+  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'MEETING' | 'WALLET' | 'BILLING' | 'ADMIN' | 'GUIDE'>(() => {
+    return sessionStorage.getItem('sinergia_active_meeting_id') ? 'MEETING' : 'DASHBOARD';
+  });
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isEditingSidebarName, setIsEditingSidebarName] = useState(false);
 
   // Redirect to active meeting once authenticated
   useEffect(() => {
@@ -266,6 +271,8 @@ export default function App() {
     setCurrentUser(null);
     localStorage.removeItem('sinergia_user');
     sessionStorage.removeItem('sinergia_guest_user');
+    sessionStorage.removeItem('sinergia_active_meeting_id');
+    setIsEditingSidebarName(false);
     setActiveTab('DASHBOARD');
     setActiveMeetingId(null);
   };
@@ -289,6 +296,7 @@ export default function App() {
   };
 
   const handleJoinMeeting = (meetingId: string) => {
+    sessionStorage.setItem('sinergia_active_meeting_id', meetingId);
     setActiveMeetingId(meetingId);
     setActiveTab('MEETING');
   };
@@ -328,7 +336,7 @@ export default function App() {
           )}
 
           {/* Toggle buttons */}
-          <div className={`grid ${pendingMeetingId ? 'grid-cols-3' : 'grid-cols-2'} gap-1 bg-[#0F172A] p-1 rounded-xl border border-[#2D3748]`}>
+          <div className="grid grid-cols-3 gap-1 bg-[#0F172A] p-1 rounded-xl border border-[#2D3748]">
             <button
               id="auth-toggle-login"
               type="button"
@@ -349,18 +357,16 @@ export default function App() {
             >
               Registrarse
             </button>
-            {pendingMeetingId && (
-              <button
-                id="auth-toggle-guest"
-                type="button"
-                onClick={() => { setAuthMode('GUEST'); setAuthError(''); }}
-                className={`py-1.5 rounded-lg text-center font-mono text-[10px] sm:text-xs font-bold transition-all cursor-pointer ${
-                  authMode === 'GUEST' ? 'bg-[#1E293B] text-[#3B82F6] border border-[#2D3748]' : 'text-[#94A3B8]'
-                }`}
-              >
-                Invitado
-              </button>
-            )}
+            <button
+              id="auth-toggle-guest"
+              type="button"
+              onClick={() => { setAuthMode('GUEST'); setAuthError(''); }}
+              className={`py-1.5 rounded-lg text-center font-mono text-[10px] sm:text-xs font-bold transition-all cursor-pointer ${
+                authMode === 'GUEST' ? 'bg-[#1E293B] text-[#3B82F6] border border-[#2D3748]' : 'text-[#94A3B8]'
+              }`}
+            >
+              Invitado
+            </button>
           </div>
 
           <form onSubmit={authMode === 'GUEST' ? handleGuestJoin : (authMode === 'LOGIN' ? handleLogin : handleRegister)} className="space-y-4">
@@ -555,10 +561,48 @@ export default function App() {
                 onClick={() => avatarInputRef.current?.click()}
                 title="Subir foto de perfil"
               />
-              <div className="space-y-0.5">
-                <p className="text-xs font-bold text-white max-w-[140px] truncate">{currentUser.name}</p>
-                <span className="text-[9px] font-mono py-0.5 px-2 bg-blue-500/10 text-blue-400 rounded border border-blue-500/15 font-semibold">
-                  {currentUser.role}
+              <div className="space-y-0.5 flex-1 min-w-0">
+                {isEditingSidebarName ? (
+                  <div className="flex flex-col gap-1">
+                    <input
+                      id="sidebar-rename-input"
+                      type="text"
+                      defaultValue={currentUser.name}
+                      onBlur={(e) => {
+                        const val = e.target.value.trim();
+                        if (val && val !== currentUser.name) {
+                          handleUpdateUserName(val);
+                        }
+                        setIsEditingSidebarName(false);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const val = (e.target as HTMLInputElement).value.trim();
+                          if (val && val !== currentUser.name) {
+                            handleUpdateUserName(val);
+                          }
+                          setIsEditingSidebarName(false);
+                        } else if (e.key === 'Escape') {
+                          setIsEditingSidebarName(false);
+                        }
+                      }}
+                      className="bg-[#0F172A] text-white text-xs border border-blue-500/50 rounded px-1.5 py-0.5 w-full focus:outline-none font-bold"
+                      autoFocus
+                    />
+                    <span className="text-[8px] text-slate-400 font-mono">Presiona Enter para guardar</span>
+                  </div>
+                ) : (
+                  <div 
+                    onClick={() => setIsEditingSidebarName(true)} 
+                    className="group select-none cursor-pointer flex items-center gap-1.5"
+                    title="Haz clic para cambiar tu nombre"
+                  >
+                    <p className="text-xs font-bold text-white truncate max-w-[110px]">{currentUser.name}</p>
+                    <Edit3 className="w-3 h-3 text-[#94A3B8] group-hover:text-blue-400 opacity-60 group-hover:opacity-100 transition-all shrink-0" />
+                  </div>
+                )}
+                <span className="text-[9px] font-mono py-0.5 px-2 bg-blue-500/10 text-blue-400 rounded border border-blue-500/15 font-semibold inline-block">
+                  {currentUser.role === 'GUEST' ? 'INVITADO' : currentUser.role}
                 </span>
               </div>
             </div>
@@ -601,6 +645,7 @@ export default function App() {
                       setActiveTab(item.id as any);
                       setSidebarOpen(false);
                       if (item.id !== 'MEETING') {
+                        sessionStorage.removeItem('sinergia_active_meeting_id');
                         setActiveMeetingId(null);
                       }
                     }}
@@ -653,6 +698,7 @@ export default function App() {
             meetingId={activeMeetingId} 
             user={currentUser} 
             onExit={() => {
+              sessionStorage.removeItem('sinergia_active_meeting_id');
               setActiveMeetingId(null);
               setActiveTab('DASHBOARD');
             }}

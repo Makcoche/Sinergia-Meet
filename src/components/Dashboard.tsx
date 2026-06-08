@@ -48,7 +48,7 @@ export default function Dashboard({ user, onJoinMeeting, onNavigateToWallet, onN
   };
   const [newTitle, setNewTitle] = useState('');
   const [newPass, setNewPass] = useState('');
-  const [waitingRoom, setWaitingRoom] = useState(true);
+  const [waitingRoom, setWaitingRoom] = useState(false);
   const [scheduledDate, setScheduledDate] = useState('');
 
   const [teamName, setTeamName] = useState('');
